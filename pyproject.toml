@@ -1,0 +1,9 @@
+[project]
+name = "model-workload-telemetry"
+version = "0.1.0"
+description = "Compare model runs by shared workload instead of raw totals"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+[tool.pyright]
+pythonVersion = "3.10"

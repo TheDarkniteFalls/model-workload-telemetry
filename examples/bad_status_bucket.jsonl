@@ -1,0 +1,1 @@
+{"schema_version":1,"run_id":"bad-status-1","task_id":"maintenance-1","task_class":"maintenance","model":"compact-a","turns":2,"input_tokens":800,"output_tokens":120,"cached_tokens":100,"wall_seconds":8,"status":"completed","failure_bucket":"infrastructure","human_score":4,"revision_count":0}

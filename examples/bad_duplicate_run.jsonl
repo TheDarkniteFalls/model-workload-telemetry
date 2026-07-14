@@ -1,0 +1,2 @@
+{"schema_version":1,"run_id":"duplicate-run","task_id":"maintenance-1","task_class":"maintenance","model":"compact-a","turns":2,"input_tokens":800,"output_tokens":120,"cached_tokens":100,"wall_seconds":8,"status":"completed","failure_bucket":"none","human_score":4,"revision_count":0}
+{"schema_version":1,"run_id":"duplicate-run","task_id":"maintenance-1","task_class":"maintenance","model":"integrator-b","turns":3,"input_tokens":1200,"output_tokens":180,"cached_tokens":400,"wall_seconds":14,"status":"completed","failure_bucket":"none","human_score":5,"revision_count":0}

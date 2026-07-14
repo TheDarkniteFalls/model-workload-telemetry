@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+search_dir="$repo_root"
+lane_root=""
+
+while [ "$search_dir" != "/" ]; do
+  if [ -f "$search_dir/scripts/publicctl.py" ]; then
+    lane_root="$search_dir"
+    break
+  fi
+  search_dir=$(dirname "$search_dir")
+done
+
+if [ -z "$lane_root" ]; then
+  echo "Could not find Public GitHub lane root." >&2
+  exit 2
+fi
+
+python3 "$lane_root/scripts/publicctl.py" prepush "$repo_root"
