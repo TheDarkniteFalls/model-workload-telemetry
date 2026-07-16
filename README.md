@@ -1,5 +1,17 @@
 # Model Workload Telemetry
 
+<!-- toolkit-trust-card:start -->
+> **Public contract:** Experimental tool · about 10 min · Python 3 · no model · no network
+>
+> **Operation:** Read-only check; examples may use temporary files
+>
+> **A pass establishes:** Only task instances attempted by every compared model contribute to each workload report.
+>
+> **It does not establish:** The report does not prove causal model superiority, cost efficiency, or statistical significance.
+>
+> **First check:** `python3 -B model_workload_telemetry.py --self-test`
+<!-- toolkit-trust-card:end -->
+
 A dependency-free CLI for comparing model runs by shared task class instead of
 raw token totals.
 
