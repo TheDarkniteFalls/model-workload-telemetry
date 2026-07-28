@@ -45,6 +45,7 @@ Requires Python 3.10 or newer.
 python3 -B model_workload_telemetry.py validate examples/runs.jsonl
 python3 -B model_workload_telemetry.py report examples/runs.jsonl
 python3 -B model_workload_telemetry.py report examples/runs.jsonl --json
+python3 -B model_workload_telemetry.py shadow-route examples/runs.jsonl examples/shadow_route_policy.json --json
 python3 -B model_workload_telemetry.py --self-test
 python3 -B -m unittest discover -s tests -v
 ```
@@ -74,6 +75,60 @@ Within each task class, the report first finds task IDs attempted by every
 model. All reported model metrics for that class use only those shared tasks.
 This prevents missing or selectively assigned tasks from silently improving a
 model's apparent result.
+
+## Evidence-Gated Shadow Routing
+
+The `shadow-route` report turns paired workload measurements into an
+inspectable candidate route without calling a model, using the network,
+changing defaults, or executing the route.
+
+It accepts the existing JSONL run records unchanged plus a separate policy
+file that binds two model roles and declares thresholds per task class:
+
+- `deterministic`: a declared non-model path whose synthetic fixture summary
+  has enough cases and zero failures;
+- `fast_small`: the smaller model passes the hard gates, stays within the
+  allowed human-score gap, and provides the declared latency advantage;
+- `primary_quality`: the primary model passes while the fast model is blocked
+  by quality, boundary, completion, revision, or relative-comparison evidence;
+- `hold`: evidence is missing, insufficient, runtime-incomplete, or unsafe.
+
+The bundled policy uses two shared tasks so the example stays small. That is a
+demonstration threshold, not statistical or production guidance.
+
+Every successful report states:
+
+```json
+{
+  "report_mode": "shadow_only",
+  "model_called": false,
+  "network_called": false,
+  "state_mutating": false,
+  "actual_route": "none",
+  "automatic_route_change": false,
+  "promotion_decision": "not_promoted"
+}
+```
+
+The report gates shared-task coverage, completion, schema and source-boundary
+failures, answer quality, human revision burden, average latency, quality gap,
+and fast-route latency advantage. Thresholds use unrounded values; metric
+summaries are rounded only after route decisions are made. Infrastructure
+failures produce `hold_runtime_incomplete`; they are not relabeled as
+answer-quality failures.
+
+Action authority, protected-path proof, semantic truth, live-model quality,
+statistical significance, and real monetary cost remain explicitly
+`not_assessed`. A shadow candidate is evidence for human review, not authority
+to change a route.
+
+This complements the [Local Model Reliability Example](https://github.com/TheDarkniteFalls/local-model-reliability-example),
+which validates one proposed model output before an application trusts it.
+Here, the unit of evidence is a set of paired run records used to assess a
+candidate workload route. The [Local Assistant Reliability Lab](https://github.com/TheDarkniteFalls/local-assistant-reliability-lab)
+remains the navigator and integrated overview; this repo supplies the focused
+measurement and shadow-decision example rather than duplicating its catalog or
+workflow.
 
 ## What A Report Does Not Prove
 

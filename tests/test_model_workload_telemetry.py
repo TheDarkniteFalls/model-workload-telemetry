@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from typing import Any
 
 import model_workload_telemetry
 
@@ -11,10 +12,23 @@ EXAMPLES = ROOT / "examples"
 
 
 class ModelWorkloadTelemetryTests(unittest.TestCase):
+    def _good_policy(self) -> dict[str, Any]:
+        policy, findings = model_workload_telemetry.load_shadow_policy(EXAMPLES / "shadow_route_policy.json")
+        self.assertEqual(findings, [])
+        self.assertIsNotNone(policy)
+        return policy
+
     def test_good_records_validate(self) -> None:
         records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
         self.assertEqual(findings, [])
         self.assertEqual(len(records), 12)
+
+    def test_nonfinite_wall_time_is_rejected_before_metric_calculation(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        records[0]["wall_seconds"] = float("inf")
+        findings = model_workload_telemetry.validate_records(records)
+        self.assertIn("NONNEGATIVE_NUMBER", {finding.code for finding in findings})
 
     def test_expected_bad_records_fail_with_named_code(self) -> None:
         for name, (_, expected_code) in model_workload_telemetry.SELF_TEST_CASES.items():
@@ -39,6 +53,257 @@ class ModelWorkloadTelemetryTests(unittest.TestCase):
         self.assertEqual(findings, [])
         report = model_workload_telemetry.build_report(records)
         self.assertIn("does not calculate a universal model winner", report["warning"])
+
+    def test_shadow_route_report_covers_all_four_routes(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+        routes = {item["task_class"]: item["candidate_route"] for item in report["task_classes"]}
+        self.assertEqual(
+            routes,
+            {
+                "integration": "primary_quality",
+                "lookup": "deterministic",
+                "maintenance": "fast_small",
+                "research": "hold",
+            },
+        )
+
+    def test_human_score_gate_uses_exact_value_at_boundary(self) -> None:
+        for fast_score, expected_status, expected_route in (
+            (4.0, "pass", "fast_small"),
+            (3.999, "fail", "primary_quality"),
+        ):
+            with self.subTest(fast_score=fast_score):
+                records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+                self.assertEqual(findings, [])
+                for record in records:
+                    if record["task_class"] == "maintenance" and record["model"] == "compact-a":
+                        record["human_score"] = fast_score
+
+                report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+                maintenance = next(
+                    item for item in report["task_classes"] if item["task_class"] == "maintenance"
+                )
+                score_gate = next(
+                    gate for gate in maintenance["gates"] if gate["name"] == "fast_small.minimum_human_score"
+                )
+                self.assertEqual(score_gate["status"], expected_status)
+                self.assertEqual(score_gate["observed"], fast_score)
+                self.assertEqual(maintenance["candidate_route"], expected_route)
+
+                presented_score = maintenance["evidence"]["fast_small"]["avg_human_score_completed"]
+                self.assertEqual(presented_score, round(fast_score, 2))
+
+    def test_wall_time_gate_uses_exact_value_before_presentation_rounding(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        for record in records:
+            if record["task_class"] != "maintenance":
+                continue
+            record["wall_seconds"] = 60.001 if record["model"] == "compact-a" else 60.0
+
+        report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+        maintenance = next(item for item in report["task_classes"] if item["task_class"] == "maintenance")
+        wall_gate = next(
+            gate for gate in maintenance["gates"] if gate["name"] == "fast_small.maximum_average_wall_seconds"
+        )
+        self.assertEqual(wall_gate["status"], "fail")
+        self.assertEqual(wall_gate["observed"], 60.001)
+        self.assertEqual(maintenance["evidence"]["fast_small"]["avg_wall_seconds_per_attempt"], 60.0)
+
+    def test_completion_gate_uses_exact_ratio_before_presentation_rounding(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        fast_extra = dict(
+            next(
+                record
+                for record in records
+                if record["task_class"] == "maintenance" and record["model"] == "compact-a"
+            )
+        )
+        fast_extra.update(
+            run_id="run-m3-compact",
+            task_id="maintenance-3",
+            status="failed",
+            failure_bucket="human_revision",
+            human_score=None,
+        )
+        primary_extra = dict(
+            next(
+                record
+                for record in records
+                if record["task_class"] == "maintenance" and record["model"] == "integrator-b"
+            )
+        )
+        primary_extra.update(run_id="run-m3-integrator", task_id="maintenance-3")
+        records.extend((fast_extra, primary_extra))
+        self.assertEqual(model_workload_telemetry.validate_records(records), [])
+
+        policy = self._good_policy()
+        policy["defaults"]["min_shared_tasks"] = 3
+        policy["defaults"]["min_completion_rate"] = 0.667
+        report = model_workload_telemetry.build_shadow_route_report(records, policy)
+        maintenance = next(item for item in report["task_classes"] if item["task_class"] == "maintenance")
+        completion_gate = next(
+            gate for gate in maintenance["gates"] if gate["name"] == "fast_small.minimum_completion_rate"
+        )
+        self.assertEqual(completion_gate["status"], "fail")
+        self.assertLess(completion_gate["observed"], 0.667)
+        self.assertEqual(maintenance["evidence"]["fast_small"]["completion_rate"], 0.667)
+
+    def test_relative_gates_use_exact_values_on_both_sides_of_thresholds(self) -> None:
+        for primary_score, expected_status, expected_route in (
+            (4.5, "pass", "fast_small"),
+            (4.5001, "fail", "primary_quality"),
+        ):
+            with self.subTest(gate="quality_gap", primary_score=primary_score):
+                records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+                self.assertEqual(findings, [])
+                for record in records:
+                    if record["task_class"] != "maintenance":
+                        continue
+                    record["human_score"] = 4.0 if record["model"] == "compact-a" else primary_score
+
+                report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+                maintenance = next(
+                    item for item in report["task_classes"] if item["task_class"] == "maintenance"
+                )
+                quality_gate = next(
+                    gate for gate in maintenance["gates"] if gate["name"] == "fast_small.maximum_quality_gap"
+                )
+                self.assertEqual(quality_gate["status"], expected_status)
+                self.assertEqual(maintenance["candidate_route"], expected_route)
+
+        for fast_wall, expected_status, expected_route in (
+            (13.05, "pass", "fast_small"),
+            (13.051, "fail", "primary_quality"),
+        ):
+            with self.subTest(gate="latency_advantage", fast_wall=fast_wall):
+                records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+                self.assertEqual(findings, [])
+                for record in records:
+                    if record["task_class"] != "maintenance":
+                        continue
+                    record["human_score"] = 4.5
+                    record["wall_seconds"] = fast_wall if record["model"] == "compact-a" else 14.5
+
+                report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+                maintenance = next(
+                    item for item in report["task_classes"] if item["task_class"] == "maintenance"
+                )
+                latency_gate = next(
+                    gate
+                    for gate in maintenance["gates"]
+                    if gate["name"] == "fast_small.minimum_latency_advantage"
+                )
+                self.assertEqual(latency_gate["status"], expected_status)
+                self.assertEqual(maintenance["candidate_route"], expected_route)
+
+    def test_invalid_shadow_policy_rejects_same_model_binding(self) -> None:
+        _, findings = model_workload_telemetry.load_shadow_policy(EXAMPLES / "bad_shadow_route_policy.json")
+        self.assertIn("POLICY_ROUTE_BINDING", {finding.code for finding in findings})
+
+    def test_shadow_route_report_preserves_non_execution_invariants(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+        self.assertFalse(report["model_called"])
+        self.assertFalse(report["network_called"])
+        self.assertFalse(report["state_mutating"])
+        self.assertEqual(report["actual_route"], "none")
+        self.assertFalse(report["automatic_route_change"])
+        self.assertEqual(report["promotion_decision"], "not_promoted")
+        self.assertTrue(all(item["promotion_decision"] == "not_promoted" for item in report["task_classes"]))
+
+    def test_unbound_model_does_not_change_route_comparison(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        observer = dict(
+            next(
+                record
+                for record in records
+                if record["model"] == "compact-a" and record["task_id"] == "maintenance-1"
+            )
+        )
+        observer.update(run_id="observer-maintenance-1", model="observer-c")
+        records.append(observer)
+        self.assertEqual(model_workload_telemetry.validate_records(records), [])
+
+        report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+        maintenance = next(item for item in report["task_classes"] if item["task_class"] == "maintenance")
+        self.assertEqual(maintenance["candidate_route"], "fast_small")
+        self.assertEqual(maintenance["evidence"]["shared_task_count"], 2)
+        self.assertEqual(report["input_record_count"], 13)
+
+    def test_infrastructure_failure_holds_without_becoming_quality_failure(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        runtime_records = [dict(record) for record in records]
+        compact_maintenance = next(
+            record
+            for record in runtime_records
+            if record["model"] == "compact-a" and record["task_class"] == "maintenance"
+        )
+        compact_maintenance["status"] = "failed"
+        compact_maintenance["failure_bucket"] = "infrastructure"
+        compact_maintenance["human_score"] = None
+        self.assertEqual(model_workload_telemetry.validate_records(runtime_records), [])
+
+        report = model_workload_telemetry.build_shadow_route_report(runtime_records, self._good_policy())
+        maintenance = next(item for item in report["task_classes"] if item["task_class"] == "maintenance")
+        self.assertEqual(maintenance["candidate_route"], "hold")
+        self.assertEqual(maintenance["decision_status"], "hold_runtime_incomplete")
+        self.assertEqual(maintenance["rejection_reasons"], ["NOT_ASSESSED_RUNTIME_FAILURE"])
+        self.assertEqual(
+            [gate["name"] for gate in maintenance["gates"]],
+            ["comparison.zero_infrastructure_failures"],
+        )
+
+    def test_infrastructure_failure_precedes_missing_model_evidence(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        runtime_records = [
+            dict(record)
+            for record in records
+            if not (record["model"] == "integrator-b" and record["task_class"] == "maintenance")
+        ]
+        compact_maintenance = next(
+            record
+            for record in runtime_records
+            if record["model"] == "compact-a" and record["task_class"] == "maintenance"
+        )
+        compact_maintenance["status"] = "failed"
+        compact_maintenance["failure_bucket"] = "infrastructure"
+        compact_maintenance["human_score"] = None
+        self.assertEqual(model_workload_telemetry.validate_records(runtime_records), [])
+
+        report = model_workload_telemetry.build_shadow_route_report(runtime_records, self._good_policy())
+        maintenance = next(item for item in report["task_classes"] if item["task_class"] == "maintenance")
+        self.assertEqual(maintenance["candidate_route"], "hold")
+        self.assertEqual(maintenance["decision_status"], "hold_runtime_incomplete")
+        self.assertEqual(maintenance["rejection_reasons"], ["NOT_ASSESSED_RUNTIME_FAILURE"])
+        self.assertEqual(
+            [gate["name"] for gate in maintenance["gates"]],
+            ["comparison.zero_infrastructure_failures"],
+        )
+
+    def test_policy_rejects_nonfinite_threshold(self) -> None:
+        policy = self._good_policy()
+        policy["defaults"]["max_avg_wall_seconds"] = float("inf")
+        findings = model_workload_telemetry.validate_shadow_policy(policy)
+        self.assertIn("POLICY_THRESHOLD", {finding.code for finding in findings})
+
+    def test_human_report_states_all_non_execution_invariants(self) -> None:
+        records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
+        self.assertEqual(findings, [])
+        report = model_workload_telemetry.build_shadow_route_report(records, self._good_policy())
+        rendered = model_workload_telemetry.render_shadow_route_report(report)
+        self.assertIn(
+            "model_called=false network_called=false state_mutating=false "
+            "actual_route=none automatic_route_change=false promotion_decision=not_promoted",
+            rendered,
+        )
 
 
 if __name__ == "__main__":
