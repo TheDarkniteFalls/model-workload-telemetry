@@ -8,8 +8,8 @@ import json
 import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
-from statistics import mean
 from typing import Any, Iterable
 
 
@@ -56,6 +56,15 @@ THRESHOLD_FIELDS = {
     "max_avg_wall_seconds",
     "max_quality_gap",
     "min_latency_advantage_fraction",
+}
+METRIC_PRESENTATION_PRECISION = {
+    "completion_rate": 3,
+    "avg_turns_per_attempt": 2,
+    "avg_uncached_tokens_per_attempt": 2,
+    "avg_cached_tokens_per_attempt": 2,
+    "avg_wall_seconds_per_attempt": 2,
+    "avg_human_score_completed": 2,
+    "avg_revisions_completed": 2,
 }
 
 
@@ -308,8 +317,8 @@ def validate_records(records: list[dict[str, Any]]) -> list[Finding]:
                 findings.append(Finding("NONNEGATIVE_INTEGER", f"line {line}: {field} must be non-negative"))
         if record.get("turns") == 0:
             findings.append(Finding("ZERO_TURNS", f"line {line}: turns must be at least 1"))
-        if not _is_nonnegative_number(record.get("wall_seconds")):
-            findings.append(Finding("NONNEGATIVE_NUMBER", f"line {line}: wall_seconds must be non-negative"))
+        if not _is_finite_nonnegative_number(record.get("wall_seconds")):
+            findings.append(Finding("NONNEGATIVE_NUMBER", f"line {line}: wall_seconds must be finite and non-negative"))
 
         status = record.get("status")
         bucket = record.get("failure_bucket")
@@ -332,9 +341,13 @@ def validate_records(records: list[dict[str, Any]]) -> list[Finding]:
     return findings
 
 
-def _rounded_average(values: Iterable[float]) -> float | None:
-    materialized = list(values)
-    return round(mean(materialized), 2) if materialized else None
+def _decimal(value: int | float | Decimal) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+def _average(values: Iterable[int | float]) -> Decimal | None:
+    materialized = [_decimal(value) for value in values]
+    return sum(materialized, Decimal(0)) / Decimal(len(materialized)) if materialized else None
 
 
 def _metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -343,20 +356,29 @@ def _metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "attempts": len(records),
         "completed": len(completed),
-        "completion_rate": round(len(completed) / len(records), 3) if records else None,
-        "avg_turns_per_attempt": _rounded_average(record["turns"] for record in records),
-        "avg_uncached_tokens_per_attempt": _rounded_average(
+        "completion_rate": Decimal(len(completed)) / Decimal(len(records)) if records else None,
+        "avg_turns_per_attempt": _average(record["turns"] for record in records),
+        "avg_uncached_tokens_per_attempt": _average(
             record["input_tokens"] + record["output_tokens"] for record in records
         ),
-        "avg_cached_tokens_per_attempt": _rounded_average(record["cached_tokens"] for record in records),
-        "avg_wall_seconds_per_attempt": _rounded_average(record["wall_seconds"] for record in records),
-        "avg_human_score_completed": _rounded_average(record["human_score"] for record in completed),
-        "avg_revisions_completed": _rounded_average(record["revision_count"] for record in completed),
+        "avg_cached_tokens_per_attempt": _average(record["cached_tokens"] for record in records),
+        "avg_wall_seconds_per_attempt": _average(record["wall_seconds"] for record in records),
+        "avg_human_score_completed": _average(record["human_score"] for record in completed),
+        "avg_revisions_completed": _average(record["revision_count"] for record in completed),
         "failure_buckets": dict(sorted(failures.items())),
     }
 
 
-def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
+def _present_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    presented = dict(metrics)
+    for field, precision in METRIC_PRESENTATION_PRECISION.items():
+        value = presented[field]
+        if value is not None:
+            presented[field] = float(round(value, precision))
+    return presented
+
+
+def _build_task_classes(records: list[dict[str, Any]], *, present_metrics: bool) -> list[dict[str, Any]]:
     by_class: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         by_class[record["task_class"]].append(record)
@@ -374,7 +396,10 @@ def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
         results = []
         for model in models:
             model_records = [record for record in paired if record["model"] == model]
-            results.append({"model": model, **_metrics(model_records)})
+            metrics = _metrics(model_records)
+            if present_metrics:
+                metrics = _present_metrics(metrics)
+            results.append({"model": model, **metrics})
 
         classes.append(
             {
@@ -386,6 +411,12 @@ def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "results": results,
             }
         )
+
+    return classes
+
+
+def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
+    classes = _build_task_classes(records, present_metrics=True)
 
     return {
         "schema_version": 1,
@@ -399,10 +430,18 @@ def _gate(name: str, passed: bool, observed: object, required: object, reason: s
     return {
         "name": name,
         "status": "pass" if passed else "fail",
-        "observed": observed,
-        "required": required,
+        "observed": float(observed) if isinstance(observed, Decimal) else observed,
+        "required": float(required) if isinstance(required, Decimal) else required,
         "reason": reason,
     }
+
+
+def _meets_minimum(observed: int | float | Decimal | None, required: int | float) -> bool:
+    return observed is not None and _decimal(observed) >= _decimal(required)
+
+
+def _meets_maximum(observed: int | float | Decimal | None, required: int | float) -> bool:
+    return observed is not None and _decimal(observed) <= _decimal(required)
 
 
 def _gates_pass(gates: list[dict[str, Any]]) -> bool:
@@ -448,8 +487,7 @@ def _model_route_gates(
         ),
         _gate(
             f"{prefix}.minimum_completion_rate",
-            result["completion_rate"] is not None
-            and result["completion_rate"] >= thresholds["min_completion_rate"],
+            _meets_minimum(result["completion_rate"], thresholds["min_completion_rate"]),
             result["completion_rate"],
             thresholds["min_completion_rate"],
             "Completion rate is calculated only from paired task instances.",
@@ -471,23 +509,21 @@ def _model_route_gates(
         [
             _gate(
                 f"{prefix}.minimum_human_score",
-                score is not None and score >= thresholds["min_avg_human_score"],
+                _meets_minimum(score, thresholds["min_avg_human_score"]),
                 score,
                 thresholds["min_avg_human_score"],
                 "Completed paired runs must meet the declared average human score.",
             ),
             _gate(
                 f"{prefix}.maximum_average_revisions",
-                result["avg_revisions_completed"] is not None
-                and result["avg_revisions_completed"] <= thresholds["max_avg_revisions"],
+                _meets_maximum(result["avg_revisions_completed"], thresholds["max_avg_revisions"]),
                 result["avg_revisions_completed"],
                 thresholds["max_avg_revisions"],
                 "Completed paired runs must stay within the declared revision burden.",
             ),
             _gate(
                 f"{prefix}.maximum_average_wall_seconds",
-                result["avg_wall_seconds_per_attempt"] is not None
-                and result["avg_wall_seconds_per_attempt"] <= thresholds["max_avg_wall_seconds"],
+                _meets_maximum(result["avg_wall_seconds_per_attempt"], thresholds["max_avg_wall_seconds"]),
                 result["avg_wall_seconds_per_attempt"],
                 thresholds["max_avg_wall_seconds"],
                 "Paired attempts must stay within the declared average latency ceiling.",
@@ -518,6 +554,17 @@ def _route_decision(
         "gates": gates,
         "evidence": evidence,
     }
+
+
+def _present_route_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    presented = dict(decision)
+    evidence = dict(decision["evidence"])
+    for route_name in ("fast_small", "primary_quality"):
+        metrics = evidence[route_name]
+        if metrics is not None:
+            evidence[route_name] = _present_metrics(metrics)
+    presented["evidence"] = evidence
+    return presented
 
 
 def _build_task_class_route(
@@ -627,22 +674,21 @@ def _build_task_class_route(
     fast_wall = fast_result["avg_wall_seconds_per_attempt"]
     primary_wall = primary_result["avg_wall_seconds_per_attempt"]
     latency_advantage = (
-        round((primary_wall - fast_wall) / primary_wall, 3)
+        (primary_wall - fast_wall) / primary_wall
         if fast_wall is not None and primary_wall is not None and primary_wall > 0
         else None
     )
     relative_gates = [
         _gate(
             "fast_small.maximum_quality_gap",
-            quality_gap is not None and quality_gap <= thresholds["max_quality_gap"],
+            _meets_maximum(quality_gap, thresholds["max_quality_gap"]),
             quality_gap,
             thresholds["max_quality_gap"],
             "The fast route must stay within the declared human-score gap to the primary route.",
         ),
         _gate(
             "fast_small.minimum_latency_advantage",
-            latency_advantage is not None
-            and latency_advantage >= thresholds["min_latency_advantage_fraction"],
+            _meets_minimum(latency_advantage, thresholds["min_latency_advantage_fraction"]),
             latency_advantage,
             thresholds["min_latency_advantage_fraction"],
             "The fast route must provide the declared average latency advantage.",
@@ -690,9 +736,15 @@ def build_shadow_route_report(records: list[dict[str, Any]], policy: dict[str, A
         policy["routes"]["fast_small"]["model"],
         policy["routes"]["primary_quality"]["model"],
     }
-    comparison_report = build_report([record for record in records if record["model"] in route_models])
-    comparisons = {item["task_class"]: item for item in comparison_report["task_classes"]}
+    comparison_classes = _build_task_classes(
+        [record for record in records if record["model"] in route_models],
+        present_metrics=False,
+    )
+    comparisons = {item["task_class"]: item for item in comparison_classes}
     task_classes = sorted(set(comparisons) | set(policy["task_classes"]))
+    route_decisions = [
+        _build_task_class_route(task_class, comparisons.get(task_class), policy) for task_class in task_classes
+    ]
     return {
         "schema_version": SHADOW_REPORT_SCHEMA,
         "status": "pass",
@@ -707,9 +759,7 @@ def build_shadow_route_report(records: list[dict[str, Any]], policy: dict[str, A
         "input_record_count": len(records),
         "comparison_rule": "Only shared task IDs contribute to model-route decisions.",
         "warning": "A shadow candidate is not an executed route or a promotion decision.",
-        "task_classes": [
-            _build_task_class_route(task_class, comparisons.get(task_class), policy) for task_class in task_classes
-        ],
+        "task_classes": [_present_route_decision(decision) for decision in route_decisions],
         "external_requirements": [
             {"name": "live_model_quality", "status": "not_assessed"},
             {"name": "semantic_truth", "status": "not_assessed"},

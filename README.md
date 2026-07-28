@@ -112,8 +112,10 @@ Every successful report states:
 
 The report gates shared-task coverage, completion, schema and source-boundary
 failures, answer quality, human revision burden, average latency, quality gap,
-and fast-route latency advantage. Infrastructure failures produce
-`hold_runtime_incomplete`; they are not relabeled as answer-quality failures.
+and fast-route latency advantage. Thresholds use unrounded values; metric
+summaries are rounded only after route decisions are made. Infrastructure
+failures produce `hold_runtime_incomplete`; they are not relabeled as
+answer-quality failures.
 
 Action authority, protected-path proof, semantic truth, live-model quality,
 statistical significance, and real monetary cost remain explicitly
