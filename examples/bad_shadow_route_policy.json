@@ -1,0 +1,25 @@
+{
+  "schema_version": "shadow_route_policy_v0",
+  "policy_id": "invalid_same_model_v0",
+  "routes": {
+    "fast_small": {
+      "model": "compact-a"
+    },
+    "primary_quality": {
+      "model": "compact-a"
+    }
+  },
+  "defaults": {
+    "min_shared_tasks": 2,
+    "min_deterministic_cases": 4,
+    "min_completion_rate": 1.0,
+    "min_avg_human_score": 4.0,
+    "max_avg_revisions": 1.0,
+    "max_avg_wall_seconds": 60.0,
+    "max_quality_gap": 0.5,
+    "min_latency_advantage_fraction": 0.1
+  },
+  "task_classes": {
+    "maintenance": {}
+  }
+}
