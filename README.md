@@ -46,6 +46,8 @@ python3 -B model_workload_telemetry.py validate examples/runs.jsonl
 python3 -B model_workload_telemetry.py report examples/runs.jsonl
 python3 -B model_workload_telemetry.py report examples/runs.jsonl --json
 python3 -B model_workload_telemetry.py shadow-route examples/runs.jsonl examples/shadow_route_policy.json --json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_passive.json examples/route_receipt_attempt_ground_truth.json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_enforced.json examples/route_receipt_attempt_ground_truth.json
 python3 -B model_workload_telemetry.py --self-test
 python3 -B -m unittest discover -s tests -v
 ```
@@ -129,6 +131,31 @@ candidate workload route. The [Local Assistant Reliability Lab](https://github.c
 remains the navigator and integrated overview; this repo supplies the focused
 measurement and shadow-decision example rather than duplicating its catalog or
 workflow.
+
+## Synthetic Route Receipts
+
+Phase 1 adds a strict, dependency-free `route_receipt_v0` validation contract.
+It reconciles a synthetic receipt against a separate attempt-ground-truth
+fixture so a receipt cannot verify itself. The formal schema is
+[`schemas/route_receipt_v0.schema.json`](schemas/route_receipt_v0.schema.json).
+
+The examples describe the same synthetic fallback sequence in two modes:
+
+- `passive` records what happened and may claim only `observed_only`;
+- `enforced` may claim `auditable_complete` only when attempt attribution,
+  fallback policy, quality separation, expected writes, and receipt
+  finalization all pass.
+
+The contract rejects missing attempts, wrong final-model attribution,
+unassessed runtime failures entering quality evidence, forbidden fallback,
+receipt-finalization failure, and unexpected writes. Both examples keep
+`execution_mode=synthetic_replay`, `model_called=false`,
+`network_called=false`, `state_mutating=false`, `actual_route=none`, and
+`promotion_decision=not_promoted`.
+
+This is a proposal-compatible validation surface, not a router. It does not
+expand the workload set, call or select a live model, retry a request, change a
+default, persist a receipt, or promote a route.
 
 ## What A Report Does Not Prove
 

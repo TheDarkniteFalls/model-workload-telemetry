@@ -1,0 +1,77 @@
+{
+  "schema_version": "route_receipt_v0",
+  "receipt_id": "receipt-passive-synthetic-runtime-fallback-v0",
+  "case_id": "synthetic-runtime-fallback-v0",
+  "receipt_mode": "passive",
+  "execution_mode": "synthetic_replay",
+  "model_called": false,
+  "network_called": false,
+  "state_mutating": false,
+  "policy_id": "synthetic-route-receipt-phase1-v0",
+  "candidate_route": "fast_small",
+  "actual_route": "none",
+  "attempts": [
+    {
+      "attempt_id": "attempt-fast-1",
+      "ordinal": 1,
+      "route": "fast_small",
+      "requested_model": "compact-a",
+      "responding_model": null,
+      "outcome": "infrastructure_failure",
+      "failure_stage": "request_open",
+      "quality_status": "not_assessed_runtime_failure",
+      "fallback_from_attempt_id": null,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "wall_seconds": 0.25
+    },
+    {
+      "attempt_id": "attempt-primary-2",
+      "ordinal": 2,
+      "route": "primary_quality",
+      "requested_model": "integrator-b",
+      "responding_model": "integrator-b",
+      "outcome": "completed",
+      "failure_stage": "none",
+      "quality_status": "assessed_pass",
+      "fallback_from_attempt_id": "attempt-fast-1",
+      "input_tokens": 120,
+      "output_tokens": 40,
+      "wall_seconds": 1.75
+    }
+  ],
+  "final_attempt_id": "attempt-primary-2",
+  "final_model": "integrator-b",
+  "completion_status": "completed_via_fallback",
+  "fallback": {
+    "permitted": true,
+    "used": true,
+    "trigger_attempt_id": "attempt-fast-1",
+    "trigger_outcome": "infrastructure_failure"
+  },
+  "quality": {
+    "assessed_attempt_ids": [
+      "attempt-primary-2"
+    ],
+    "unassessed_attempts": [
+      {
+        "attempt_id": "attempt-fast-1",
+        "reason": "runtime_failure"
+      }
+    ],
+    "final_quality_status": "pass"
+  },
+  "writes": {
+    "expected": [],
+    "observed": [],
+    "unexpected": []
+  },
+  "finalization": {
+    "status": "finalized",
+    "integrity_verified": true
+  },
+  "enforcement_status": "not_applied",
+  "completion_claim": "observed_only",
+  "automatic_route_change": false,
+  "promotion_decision": "not_promoted"
+}
