@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import json
 import unittest
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,17 @@ class ModelWorkloadTelemetryTests(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertIsNotNone(policy)
         return policy
+
+    def _route_receipt_fixture(self, name: str = "route_receipt_enforced.json") -> tuple[dict[str, Any], dict[str, Any]]:
+        ground_truth, ground_truth_findings = model_workload_telemetry.load_attempt_ground_truth(
+            EXAMPLES / "route_receipt_attempt_ground_truth.json"
+        )
+        self.assertEqual(ground_truth_findings, [])
+        self.assertIsNotNone(ground_truth)
+        receipt, receipt_findings = model_workload_telemetry.load_route_receipt(EXAMPLES / name)
+        self.assertEqual(receipt_findings, [])
+        self.assertIsNotNone(receipt)
+        return receipt, ground_truth
 
     def test_good_records_validate(self) -> None:
         records, findings = model_workload_telemetry.check_path(EXAMPLES / "runs.jsonl")
@@ -304,6 +317,112 @@ class ModelWorkloadTelemetryTests(unittest.TestCase):
             "actual_route=none automatic_route_change=false promotion_decision=not_promoted",
             rendered,
         )
+
+    def test_route_receipt_json_schema_is_strict_and_matches_examples(self) -> None:
+        schema = json.loads((ROOT / "schemas" / "route_receipt_v0.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(schema["properties"]["schema_version"]["const"], "route_receipt_v0")
+        for nested in ("fallback", "quality", "writes", "finalization"):
+            self.assertFalse(schema["properties"][nested]["additionalProperties"])
+        self.assertFalse(schema["$defs"]["attempt"]["additionalProperties"])
+        self.assertEqual(schema["$defs"]["empty_string_list"]["maxItems"], 0)
+        for name in model_workload_telemetry.ROUTE_RECEIPT_SELF_TEST_CASES:
+            receipt = json.loads((EXAMPLES / name).read_text(encoding="utf-8"))
+            self.assertEqual(set(receipt), set(schema["required"]))
+
+    def test_attempt_ground_truth_is_independent_and_non_executing(self) -> None:
+        _, ground_truth = self._route_receipt_fixture()
+        self.assertEqual(model_workload_telemetry.validate_attempt_ground_truth(ground_truth), [])
+        self.assertFalse(ground_truth["model_called"])
+        self.assertFalse(ground_truth["network_called"])
+        self.assertFalse(ground_truth["state_mutating"])
+        self.assertEqual([attempt["ordinal"] for attempt in ground_truth["attempts"]], [1, 2])
+
+    def test_attempt_ground_truth_binds_candidate_and_final_attempts(self) -> None:
+        _, ground_truth = self._route_receipt_fixture()
+        wrong_candidate = copy.deepcopy(ground_truth)
+        wrong_candidate["candidate_route"] = "primary_quality"
+        wrong_final = copy.deepcopy(ground_truth)
+        wrong_final["final_attempt_id"] = "attempt-fast-1"
+        self.assertIn(
+            "GROUND_TRUTH_CANDIDATE_ATTRIBUTION",
+            {finding.code for finding in model_workload_telemetry.validate_attempt_ground_truth(wrong_candidate)},
+        )
+        self.assertIn(
+            "GROUND_TRUTH_FINAL_ATTEMPT",
+            {finding.code for finding in model_workload_telemetry.validate_attempt_ground_truth(wrong_final)},
+        )
+
+    def test_passive_and_enforced_route_receipts_validate_with_distinct_authority(self) -> None:
+        passive, ground_truth = self._route_receipt_fixture("route_receipt_passive.json")
+        enforced, _ = self._route_receipt_fixture("route_receipt_enforced.json")
+        self.assertEqual(model_workload_telemetry.validate_route_receipt(passive, ground_truth), [])
+        self.assertEqual(model_workload_telemetry.validate_route_receipt(enforced, ground_truth), [])
+        self.assertEqual((passive["enforcement_status"], passive["completion_claim"]), ("not_applied", "observed_only"))
+        self.assertEqual((enforced["enforcement_status"], enforced["completion_claim"]), ("pass", "auditable_complete"))
+        self.assertEqual(passive["attempts"], enforced["attempts"])
+
+    def test_route_receipt_rejects_missing_attempt(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture()
+        receipt = copy.deepcopy(receipt)
+        receipt["attempts"].pop(0)
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        self.assertIn("RECEIPT_MISSING_ATTEMPT", {finding.code for finding in findings})
+
+    def test_route_receipt_malformed_values_fail_closed(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture()
+        receipt = copy.deepcopy(receipt)
+        receipt["candidate_route"] = []
+        receipt["final_attempt_id"] = []
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        codes = {finding.code for finding in findings}
+        self.assertIn("RECEIPT_ROUTE", codes)
+        self.assertIn("RECEIPT_FINAL_ATTEMPT_ATTRIBUTION", codes)
+
+    def test_passive_route_receipt_cannot_claim_enforcement(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture("route_receipt_passive.json")
+        receipt = copy.deepcopy(receipt)
+        receipt["enforcement_status"] = "pass"
+        receipt["completion_claim"] = "auditable_complete"
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        self.assertIn("RECEIPT_PASSIVE_AUTHORITY", {finding.code for finding in findings})
+
+    def test_route_receipt_rejects_wrong_final_model_attribution(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture()
+        receipt = copy.deepcopy(receipt)
+        receipt["final_model"] = "compact-a"
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        self.assertIn("RECEIPT_FINAL_MODEL_ATTRIBUTION", {finding.code for finding in findings})
+
+    def test_route_receipt_rejects_unassessed_quality_contamination(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture()
+        receipt = copy.deepcopy(receipt)
+        receipt["quality"]["assessed_attempt_ids"].append("attempt-fast-1")
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        self.assertIn("RECEIPT_UNASSESSED_QUALITY_CONTAMINATION", {finding.code for finding in findings})
+
+    def test_route_receipt_rejects_forbidden_fallback(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture()
+        receipt = copy.deepcopy(receipt)
+        receipt["fallback"]["trigger_outcome"] = "validation_failure"
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        self.assertIn("RECEIPT_FORBIDDEN_FALLBACK", {finding.code for finding in findings})
+
+    def test_route_receipt_rejects_finalization_failure(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture()
+        receipt = copy.deepcopy(receipt)
+        receipt["finalization"] = {"status": "failed", "integrity_verified": False}
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        self.assertIn("RECEIPT_FINALIZATION_FAILURE", {finding.code for finding in findings})
+
+    def test_route_receipt_rejects_unexpected_writes(self) -> None:
+        receipt, ground_truth = self._route_receipt_fixture()
+        receipt = copy.deepcopy(receipt)
+        receipt["writes"]["observed"] = ["state/unexpected.json"]
+        receipt["writes"]["unexpected"] = ["state/unexpected.json"]
+        findings = model_workload_telemetry.validate_route_receipt(receipt, ground_truth)
+        self.assertIn("RECEIPT_UNEXPECTED_WRITES", {finding.code for finding in findings})
 
 
 if __name__ == "__main__":
