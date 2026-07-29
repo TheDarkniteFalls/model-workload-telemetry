@@ -157,6 +157,10 @@ This is a proposal-compatible validation surface, not a router. It does not
 expand the workload set, call or select a live model, retry a request, change a
 default, persist a receipt, or promote a route.
 
+The docs-only [Phase 2 proposal](docs/route_receipt_phase2_proposal.md) defines
+a possible synthetic coverage expansion, acceptance gates, and public-claim
+boundary. It does not authorize or implement that expansion.
+
 ## What A Report Does Not Prove
 
 The report does not prove model quality, causal superiority, cost efficiency,
