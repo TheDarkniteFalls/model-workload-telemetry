@@ -1,0 +1,704 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TheDarkniteFalls/model-workload-telemetry/schemas/route_attempt_ground_truth_v1.schema.json",
+  "title": "Synthetic route attempt ground truth v1",
+  "description": "A strict, independently authored oracle contract for synthetic route-receipt v1 validation. Dispatch is exact: only schema_version route_attempt_ground_truth_v1 is accepted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "execution_mode",
+    "model_called",
+    "network_called",
+    "state_mutating",
+    "policy_id",
+    "candidate_route",
+    "fallback_policy",
+    "attempts",
+    "final_attempt_id",
+    "final_model",
+    "completion_status",
+    "decision_disposition",
+    "final_quality_status",
+    "expected_writes",
+    "observed_writes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "route_attempt_ground_truth_v1"
+    },
+    "case_id": {
+      "$ref": "#/$defs/nonempty_string"
+    },
+    "execution_mode": {
+      "const": "synthetic_replay"
+    },
+    "model_called": {
+      "const": false
+    },
+    "network_called": {
+      "const": false
+    },
+    "state_mutating": {
+      "const": false
+    },
+    "policy_id": {
+      "$ref": "#/$defs/nonempty_string"
+    },
+    "candidate_route": {
+      "$ref": "#/$defs/route"
+    },
+    "fallback_policy": {
+      "$ref": "#/$defs/fallback_policy"
+    },
+    "attempts": {
+      "$ref": "#/$defs/ordered_attempts"
+    },
+    "final_attempt_id": {
+      "$ref": "#/$defs/nonempty_string"
+    },
+    "final_model": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "completion_status": {
+      "enum": [
+        "completed_without_fallback",
+        "completed_via_fallback",
+        "hold"
+      ]
+    },
+    "decision_disposition": {
+      "enum": [
+        "deliver",
+        "hold"
+      ]
+    },
+    "final_quality_status": {
+      "enum": [
+        "pass",
+        "fail",
+        "not_assessed"
+      ]
+    },
+    "expected_writes": {
+      "$ref": "#/$defs/empty_string_list"
+    },
+    "observed_writes": {
+      "$ref": "#/$defs/empty_string_list"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision_disposition": {
+            "const": "deliver"
+          }
+        },
+        "required": [
+          "decision_disposition"
+        ]
+      },
+      "then": {
+        "properties": {
+          "completion_status": {
+            "enum": [
+              "completed_without_fallback",
+              "completed_via_fallback"
+            ]
+          },
+          "final_model": {
+            "$ref": "#/$defs/nonempty_string"
+          },
+          "final_quality_status": {
+            "const": "pass"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision_disposition": {
+            "const": "hold"
+          },
+          "completion_status": {
+            "enum": [
+              "completed_without_fallback",
+              "completed_via_fallback"
+            ]
+          }
+        },
+        "required": [
+          "decision_disposition",
+          "completion_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "final_model": {
+            "$ref": "#/$defs/nonempty_string"
+          },
+          "final_quality_status": {
+            "const": "fail"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "completion_status": {
+            "const": "hold"
+          }
+        },
+        "required": [
+          "completion_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "decision_disposition": {
+            "const": "hold"
+          },
+          "final_quality_status": {
+            "const": "not_assessed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "completion_status": {
+            "const": "completed_without_fallback"
+          }
+        },
+        "required": [
+          "completion_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attempts": {
+            "maxItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "completion_status": {
+            "const": "completed_via_fallback"
+          }
+        },
+        "required": [
+          "completion_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attempts": {
+            "minItems": 2
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonempty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "route": {
+      "enum": [
+        "deterministic",
+        "fast_small",
+        "primary_quality",
+        "deep_comparison"
+      ]
+    },
+    "failure_category": {
+      "enum": [
+        "none",
+        "infrastructure",
+        "schema",
+        "source_boundary",
+        "safety_policy"
+      ]
+    },
+    "empty_string_list": {
+      "type": "array",
+      "maxItems": 0,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonempty_string"
+      }
+    },
+    "ordered_attempts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "prefixItems": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/attempt"
+            },
+            {
+              "properties": {
+                "ordinal": {
+                  "const": 1
+                },
+                "fallback_from_attempt_id": {
+                  "type": "null"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/attempt"
+            },
+            {
+              "properties": {
+                "ordinal": {
+                  "const": 2
+                },
+                "fallback_from_attempt_id": {
+                  "$ref": "#/$defs/nonempty_string"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "items": false
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id",
+        "ordinal",
+        "route",
+        "requested_model",
+        "responding_model",
+        "outcome",
+        "failure_stage",
+        "failure_category",
+        "quality_status",
+        "source_boundary_status",
+        "safety_boundary_status",
+        "fallback_from_attempt_id",
+        "input_tokens",
+        "output_tokens",
+        "wall_seconds"
+      ],
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "route": {
+          "$ref": "#/$defs/route"
+        },
+        "requested_model": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "responding_model": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nonempty_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "completed",
+            "infrastructure_failure",
+            "validation_failure",
+            "policy_rejected"
+          ]
+        },
+        "failure_stage": {
+          "enum": [
+            "none",
+            "pre_request",
+            "request_open",
+            "response_stream",
+            "validation",
+            "policy"
+          ]
+        },
+        "failure_category": {
+          "$ref": "#/$defs/failure_category"
+        },
+        "quality_status": {
+          "enum": [
+            "assessed_pass",
+            "assessed_fail",
+            "not_assessed_runtime_failure",
+            "not_assessed_schema_failure",
+            "not_assessed_source_boundary",
+            "not_assessed_safety_policy"
+          ]
+        },
+        "source_boundary_status": {
+          "enum": [
+            "not_applicable",
+            "pass",
+            "fail",
+            "not_assessed"
+          ]
+        },
+        "safety_boundary_status": {
+          "enum": [
+            "not_applicable",
+            "pass",
+            "blocked",
+            "not_assessed"
+          ]
+        },
+        "fallback_from_attempt_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nonempty_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wall_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "completed"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "responding_model": {
+                "$ref": "#/$defs/nonempty_string"
+              },
+              "failure_stage": {
+                "const": "none"
+              },
+              "failure_category": {
+                "const": "none"
+              },
+              "quality_status": {
+                "enum": [
+                  "assessed_pass",
+                  "assessed_fail"
+                ]
+              },
+              "source_boundary_status": {
+                "enum": [
+                  "not_applicable",
+                  "pass"
+                ]
+              },
+              "safety_boundary_status": {
+                "enum": [
+                  "not_applicable",
+                  "pass"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "infrastructure_failure"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failure_stage": {
+                "enum": [
+                  "pre_request",
+                  "request_open",
+                  "response_stream"
+                ]
+              },
+              "failure_category": {
+                "const": "infrastructure"
+              },
+              "quality_status": {
+                "const": "not_assessed_runtime_failure"
+              },
+              "source_boundary_status": {
+                "enum": [
+                  "not_applicable",
+                  "not_assessed"
+                ]
+              },
+              "safety_boundary_status": {
+                "enum": [
+                  "not_applicable",
+                  "not_assessed"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "validation_failure"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failure_stage": {
+                "const": "validation"
+              },
+              "failure_category": {
+                "enum": [
+                  "schema",
+                  "source_boundary"
+                ]
+              },
+              "quality_status": {
+                "enum": [
+                  "not_assessed_schema_failure",
+                  "not_assessed_source_boundary"
+                ]
+              },
+              "safety_boundary_status": {
+                "enum": [
+                  "not_applicable",
+                  "pass",
+                  "not_assessed"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "failure_category": {
+                "const": "schema"
+              }
+            },
+            "required": [
+              "failure_category"
+            ]
+          },
+          "then": {
+            "properties": {
+              "quality_status": {
+                "const": "not_assessed_schema_failure"
+              },
+              "source_boundary_status": {
+                "enum": [
+                  "not_applicable",
+                  "not_assessed"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "failure_category": {
+                "const": "source_boundary"
+              }
+            },
+            "required": [
+              "failure_category"
+            ]
+          },
+          "then": {
+            "properties": {
+              "quality_status": {
+                "const": "not_assessed_source_boundary"
+              },
+              "source_boundary_status": {
+                "const": "fail"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "policy_rejected"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failure_stage": {
+                "const": "policy"
+              },
+              "failure_category": {
+                "const": "safety_policy"
+              },
+              "quality_status": {
+                "const": "not_assessed_safety_policy"
+              },
+              "source_boundary_status": {
+                "enum": [
+                  "not_applicable",
+                  "pass",
+                  "not_assessed"
+                ]
+              },
+              "safety_boundary_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fallback_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_attempts",
+        "allowed_transitions"
+      ],
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "allowed_transitions": {
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/allowed_transition"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "max_attempts": {
+                "const": 1
+              }
+            },
+            "required": [
+              "max_attempts"
+            ]
+          },
+          "then": {
+            "properties": {
+              "allowed_transitions": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "allowed_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transition_id",
+        "from_route",
+        "to_route",
+        "on_outcomes",
+        "on_failure_categories"
+      ],
+      "properties": {
+        "transition_id": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "from_route": {
+          "$ref": "#/$defs/route"
+        },
+        "to_route": {
+          "$ref": "#/$defs/route"
+        },
+        "on_outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "infrastructure_failure",
+              "validation_failure",
+              "policy_rejected"
+            ]
+          }
+        },
+        "on_failure_categories": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "infrastructure",
+              "schema",
+              "source_boundary",
+              "safety_policy"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
