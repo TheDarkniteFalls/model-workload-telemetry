@@ -542,6 +542,47 @@ class ModelWorkloadTelemetryTests(unittest.TestCase):
             },
         )
 
+    def test_v1_p2_m02_attempt_and_fallback_mutations_fail_closed(self) -> None:
+        ground_truth, ground_truth_findings = model_workload_telemetry.load_attempt_ground_truth(
+            PHASE2 / "p2_m02_ground_truth.json"
+        )
+        receipt, receipt_findings = model_workload_telemetry.load_route_receipt(
+            PHASE2 / "p2_m02_enforced.json"
+        )
+        self.assertEqual(ground_truth_findings, [])
+        self.assertEqual(receipt_findings, [])
+        assert ground_truth is not None and receipt is not None
+
+        missing_attempt = copy.deepcopy(receipt)
+        missing_attempt["attempts"].pop(0)
+
+        invented_attempt = copy.deepcopy(receipt)
+        invented_attempt_id = "p2-m02-invented-attempt"
+        invented_attempt["attempts"][1]["attempt_id"] = invented_attempt_id
+        invented_attempt["final_attempt_id"] = invented_attempt_id
+        invented_attempt["fallback_transitions"][0]["to_attempt_id"] = invented_attempt_id
+        invented_attempt["quality"]["assessed_attempt_ids"] = [invented_attempt_id]
+
+        reordered_attempts = copy.deepcopy(receipt)
+        reordered_attempts["attempts"].reverse()
+
+        forbidden_fallback = copy.deepcopy(receipt)
+        forbidden_fallback["attempts"][1]["route"] = "deep_comparison"
+        forbidden_fallback["fallback_transitions"][0]["to_route"] = "deep_comparison"
+
+        mutations = (
+            ("missing_attempt", missing_attempt, "RECEIPT_MISSING_ATTEMPT"),
+            ("invented_attempt", invented_attempt, "RECEIPT_EXTRA_ATTEMPT"),
+            ("reordered_attempt_evidence", reordered_attempts, "RECEIPT_ATTEMPT_ORDER"),
+            ("forbidden_fallback_transition", forbidden_fallback, "RECEIPT_FORBIDDEN_FALLBACK"),
+        )
+        for name, mutated_receipt, primary_code in mutations:
+            with self.subTest(mutation=name, primary_code=primary_code):
+                findings = model_workload_telemetry.validate_route_receipt(
+                    mutated_receipt, ground_truth
+                )
+                self.assertIn(primary_code, {finding.code for finding in findings})
+
     def test_route_receipt_rejects_missing_attempt(self) -> None:
         receipt, ground_truth = self._route_receipt_fixture()
         receipt = copy.deepcopy(receipt)
