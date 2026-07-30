@@ -1,0 +1,69 @@
+{
+  "schema_version": "route_attempt_ground_truth_v1",
+  "case_id": "P2-I03",
+  "execution_mode": "synthetic_replay",
+  "model_called": false,
+  "network_called": false,
+  "state_mutating": false,
+  "policy_id": "synthetic-route-receipt-phase2-v1",
+  "candidate_route": "fast_small",
+  "fallback_policy": {
+    "max_attempts": 2,
+    "allowed_transitions": [
+      {
+        "transition_id": "p2-i03-fallback-1",
+        "from_route": "fast_small",
+        "to_route": "primary_quality",
+        "on_outcomes": [
+          "infrastructure_failure"
+        ],
+        "on_failure_categories": [
+          "infrastructure"
+        ]
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "attempt_id": "p2-i03-attempt-1",
+      "ordinal": 1,
+      "route": "fast_small",
+      "requested_model": "compact-a",
+      "responding_model": null,
+      "outcome": "infrastructure_failure",
+      "failure_stage": "pre_request",
+      "failure_category": "infrastructure",
+      "quality_status": "not_assessed_runtime_failure",
+      "source_boundary_status": "not_assessed",
+      "safety_boundary_status": "not_assessed",
+      "fallback_from_attempt_id": null,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "wall_seconds": 0.1
+    },
+    {
+      "attempt_id": "p2-i03-attempt-2",
+      "ordinal": 2,
+      "route": "primary_quality",
+      "requested_model": "integrator-b",
+      "responding_model": null,
+      "outcome": "infrastructure_failure",
+      "failure_stage": "response_stream",
+      "failure_category": "infrastructure",
+      "quality_status": "not_assessed_runtime_failure",
+      "source_boundary_status": "not_assessed",
+      "safety_boundary_status": "not_assessed",
+      "fallback_from_attempt_id": "p2-i03-attempt-1",
+      "input_tokens": 80,
+      "output_tokens": 0,
+      "wall_seconds": 1.2
+    }
+  ],
+  "final_attempt_id": "p2-i03-attempt-2",
+  "final_model": null,
+  "completion_status": "hold",
+  "decision_disposition": "hold",
+  "final_quality_status": "not_assessed",
+  "expected_writes": [],
+  "observed_writes": []
+}

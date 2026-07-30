@@ -11,6 +11,7 @@ import model_workload_telemetry
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
+PHASE2 = EXAMPLES / "phase2"
 
 
 class ModelWorkloadTelemetryTests(unittest.TestCase):
@@ -362,6 +363,184 @@ class ModelWorkloadTelemetryTests(unittest.TestCase):
         self.assertEqual((passive["enforcement_status"], passive["completion_claim"]), ("not_applied", "observed_only"))
         self.assertEqual((enforced["enforcement_status"], enforced["completion_claim"]), ("pass", "auditable_complete"))
         self.assertEqual(passive["attempts"], enforced["attempts"])
+
+    def test_v1_positive_fixture_matrix_validates_against_independent_truth(self) -> None:
+        receipt_schema = json.loads(
+            (ROOT / "schemas" / "route_receipt_v1.schema.json").read_text(encoding="utf-8")
+        )
+        ground_truth_schema = json.loads(
+            (ROOT / "schemas" / "route_attempt_ground_truth_v1.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        expected_cases = {
+            "P2-D01": ("completed_without_fallback", "deliver", "pass"),
+            "P2-M02": ("completed_via_fallback", "deliver", "pass"),
+            "P2-I03": ("hold", "hold", "not_assessed"),
+            "P2-Q01": ("completed_without_fallback", "hold", "fail"),
+            "P2-R01": ("hold", "hold", "not_assessed"),
+            "P2-S01": ("hold", "hold", "not_assessed"),
+        }
+
+        seen_cases: dict[str, tuple[str, str, str]] = {}
+        for ground_truth_name, receipt_names in model_workload_telemetry.ROUTE_RECEIPT_V1_POSITIVE_CASES.items():
+            with self.subTest(ground_truth=ground_truth_name):
+                ground_truth, findings = model_workload_telemetry.load_attempt_ground_truth(
+                    PHASE2 / ground_truth_name
+                )
+                self.assertEqual(findings, [])
+                self.assertIsNotNone(ground_truth)
+                assert ground_truth is not None
+                self.assertEqual(set(ground_truth), set(ground_truth_schema["required"]))
+                self.assertFalse(ground_truth["model_called"])
+                self.assertFalse(ground_truth["network_called"])
+                self.assertFalse(ground_truth["state_mutating"])
+                seen_cases[ground_truth["case_id"]] = (
+                    ground_truth["completion_status"],
+                    ground_truth["decision_disposition"],
+                    ground_truth["final_quality_status"],
+                )
+
+                for receipt_name in receipt_names:
+                    receipt, receipt_findings = model_workload_telemetry.load_route_receipt(
+                        PHASE2 / receipt_name
+                    )
+                    self.assertEqual(receipt_findings, [])
+                    self.assertIsNotNone(receipt)
+                    assert receipt is not None
+                    self.assertEqual(set(receipt), set(receipt_schema["required"]))
+                    self.assertEqual(
+                        model_workload_telemetry.validate_route_receipt(receipt, ground_truth),
+                        [],
+                    )
+                    self.assertFalse(receipt["model_called"])
+                    self.assertFalse(receipt["network_called"])
+                    self.assertFalse(receipt["state_mutating"])
+                    self.assertEqual(receipt["actual_route"], "none")
+                    self.assertFalse(receipt["automatic_route_change"])
+                    self.assertEqual(receipt["promotion_decision"], "not_promoted")
+
+        self.assertEqual(seen_cases, expected_cases)
+
+    def test_v1_passive_authority_is_distinct_for_delivery_and_hold(self) -> None:
+        for case in ("p2_d01", "p2_i03"):
+            with self.subTest(case=case):
+                ground_truth, findings = model_workload_telemetry.load_attempt_ground_truth(
+                    PHASE2 / f"{case}_ground_truth.json"
+                )
+                self.assertEqual(findings, [])
+                self.assertIsNotNone(ground_truth)
+                enforced, _ = model_workload_telemetry.load_route_receipt(
+                    PHASE2 / f"{case}_enforced.json"
+                )
+                passive, _ = model_workload_telemetry.load_route_receipt(
+                    PHASE2 / f"{case}_passive.json"
+                )
+                self.assertIsNotNone(enforced)
+                self.assertIsNotNone(passive)
+                assert ground_truth is not None and enforced is not None and passive is not None
+                self.assertEqual(model_workload_telemetry.validate_route_receipt(enforced, ground_truth), [])
+                self.assertEqual(model_workload_telemetry.validate_route_receipt(passive, ground_truth), [])
+                self.assertEqual(passive["attempts"], enforced["attempts"])
+                self.assertEqual(passive["decision_disposition"], enforced["decision_disposition"])
+                self.assertEqual(
+                    (passive["enforcement_status"], passive["completion_claim"]),
+                    ("not_applied", "observed_only"),
+                )
+                expected_claim = (
+                    "auditable_complete"
+                    if ground_truth["decision_disposition"] == "deliver"
+                    else "auditable_hold"
+                )
+                self.assertEqual(
+                    (enforced["enforcement_status"], enforced["completion_claim"]),
+                    ("pass", expected_claim),
+                )
+
+    def test_route_receipt_dispatch_keeps_v0_and_v1_exact(self) -> None:
+        v0_receipt, v0_truth = self._route_receipt_fixture()
+        v1_truth, v1_truth_findings = model_workload_telemetry.load_attempt_ground_truth(
+            PHASE2 / "p2_d01_ground_truth.json"
+        )
+        v1_receipt, v1_receipt_findings = model_workload_telemetry.load_route_receipt(
+            PHASE2 / "p2_d01_enforced.json"
+        )
+        self.assertEqual(v1_truth_findings, [])
+        self.assertEqual(v1_receipt_findings, [])
+        assert v1_truth is not None and v1_receipt is not None
+        self.assertEqual(model_workload_telemetry.validate_route_receipt(v0_receipt, v0_truth), [])
+        self.assertEqual(model_workload_telemetry.validate_route_receipt(v1_receipt, v1_truth), [])
+        self.assertIn(
+            "RECEIPT_SCHEMA_VERSION_MISMATCH",
+            {
+                finding.code
+                for finding in model_workload_telemetry.validate_route_receipt(v1_receipt, v0_truth)
+            },
+        )
+        self.assertIn(
+            "RECEIPT_SCHEMA_VERSION_MISMATCH",
+            {
+                finding.code
+                for finding in model_workload_telemetry.validate_route_receipt(v0_receipt, v1_truth)
+            },
+        )
+
+    def test_v1_json_types_do_not_use_python_numeric_equality(self) -> None:
+        ground_truth, ground_truth_findings = model_workload_telemetry.load_attempt_ground_truth(
+            PHASE2 / "p2_m02_ground_truth.json"
+        )
+        receipt, receipt_findings = model_workload_telemetry.load_route_receipt(
+            PHASE2 / "p2_m02_enforced.json"
+        )
+        self.assertEqual(ground_truth_findings, [])
+        self.assertEqual(receipt_findings, [])
+        assert ground_truth is not None and receipt is not None
+
+        bool_ground_truth = copy.deepcopy(ground_truth)
+        bool_ground_truth["attempts"][0]["ordinal"] = True
+        self.assertIn(
+            "GROUND_TRUTH_ATTEMPT_ORDER",
+            {
+                finding.code
+                for finding in model_workload_telemetry.validate_attempt_ground_truth(bool_ground_truth)
+            },
+        )
+
+        float_receipt = copy.deepcopy(receipt)
+        float_receipt["attempts"][0]["ordinal"] = 1.0
+        self.assertIn(
+            "RECEIPT_ATTEMPT_ORDER",
+            {
+                finding.code
+                for finding in model_workload_telemetry.validate_route_receipt(
+                    float_receipt, ground_truth
+                )
+            },
+        )
+
+        bool_transition = copy.deepcopy(receipt)
+        bool_transition["fallback_transitions"][0]["ordinal"] = True
+        self.assertIn(
+            "RECEIPT_FALLBACK",
+            {
+                finding.code
+                for finding in model_workload_telemetry.validate_route_receipt(
+                    bool_transition, ground_truth
+                )
+            },
+        )
+
+        numeric_permitted = copy.deepcopy(receipt)
+        numeric_permitted["fallback_transitions"][0]["permitted"] = 1
+        self.assertIn(
+            "RECEIPT_FALLBACK",
+            {
+                finding.code
+                for finding in model_workload_telemetry.validate_route_receipt(
+                    numeric_permitted, ground_truth
+                )
+            },
+        )
 
     def test_route_receipt_rejects_missing_attempt(self) -> None:
         receipt, ground_truth = self._route_receipt_fixture()

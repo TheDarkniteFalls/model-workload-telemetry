@@ -20,6 +20,8 @@ SHADOW_POLICY_SCHEMA = "shadow_route_policy_v0"
 SHADOW_REPORT_SCHEMA = "evidence_gated_shadow_route_report_v0"
 ROUTE_RECEIPT_SCHEMA = "route_receipt_v0"
 ATTEMPT_GROUND_TRUTH_SCHEMA = "route_attempt_ground_truth_v0"
+ROUTE_RECEIPT_SCHEMA_V1 = "route_receipt_v1"
+ATTEMPT_GROUND_TRUTH_SCHEMA_V1 = "route_attempt_ground_truth_v1"
 ROUTE_RECEIPT_ROUTES = {
     "deterministic",
     "fast_small",
@@ -398,7 +400,7 @@ def _validate_route_attempts(
     return attempts
 
 
-def validate_attempt_ground_truth(ground_truth: dict[str, Any]) -> list[Finding]:
+def _validate_attempt_ground_truth_v0(ground_truth: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
     root_fields = {
         "schema_version",
@@ -563,8 +565,8 @@ def validate_attempt_ground_truth(ground_truth: dict[str, Any]) -> list[Finding]
     return findings
 
 
-def validate_route_receipt(receipt: dict[str, Any], ground_truth: dict[str, Any]) -> list[Finding]:
-    if validate_attempt_ground_truth(ground_truth):
+def _validate_route_receipt_v0(receipt: dict[str, Any], ground_truth: dict[str, Any]) -> list[Finding]:
+    if _validate_attempt_ground_truth_v0(ground_truth):
         return [Finding("RECEIPT_GROUND_TRUTH_INVALID", "attempt ground truth must validate first")]
 
     findings: list[Finding] = []
@@ -864,6 +866,769 @@ def validate_route_receipt(receipt: dict[str, Any], ground_truth: dict[str, Any]
                 )
             )
     return findings
+
+
+def _validate_route_attempts_v1(
+    value: object,
+    findings: list[Finding],
+    *,
+    prefix: str,
+    context: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        findings.append(Finding(f"{prefix}_ATTEMPTS", f"{context} must be a non-empty list"))
+        return []
+    if len(value) > 2:
+        findings.append(Finding(f"{prefix}_ATTEMPTS", f"{context} may contain at most two attempts"))
+
+    attempt_fields = {
+        "attempt_id",
+        "ordinal",
+        "route",
+        "requested_model",
+        "responding_model",
+        "outcome",
+        "failure_stage",
+        "failure_category",
+        "quality_status",
+        "source_boundary_status",
+        "safety_boundary_status",
+        "fallback_from_attempt_id",
+        "input_tokens",
+        "output_tokens",
+        "wall_seconds",
+    }
+    failure_categories = {
+        "none",
+        "infrastructure",
+        "schema",
+        "source_boundary",
+        "safety_policy",
+    }
+    quality_statuses = {
+        "assessed_pass",
+        "assessed_fail",
+        "not_assessed_runtime_failure",
+        "not_assessed_schema_failure",
+        "not_assessed_source_boundary",
+        "not_assessed_safety_policy",
+    }
+    source_statuses = {"not_applicable", "pass", "fail", "not_assessed"}
+    safety_statuses = {"not_applicable", "pass", "blocked", "not_assessed"}
+    attempts: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for index, attempt in enumerate(value, start=1):
+        attempt_context = f"{context}[{index - 1}]"
+        if not isinstance(attempt, dict):
+            findings.append(Finding(f"{prefix}_ATTEMPT_SHAPE", f"{attempt_context} must be an object"))
+            continue
+        _check_contract_fields(attempt, attempt_fields, attempt_context, findings, prefix=prefix)
+        attempts.append(attempt)
+
+        attempt_id = attempt.get("attempt_id")
+        if not _is_nonempty_text(attempt_id):
+            findings.append(Finding(f"{prefix}_ATTEMPT_ID", f"{attempt_context}.attempt_id must be non-empty text"))
+        elif attempt_id in seen_ids:
+            findings.append(Finding(f"{prefix}_ATTEMPT_ID", f"duplicate attempt_id {attempt_id}"))
+        else:
+            seen_ids.add(attempt_id)
+
+        ordinal = attempt.get("ordinal")
+        if not _is_nonnegative_int(ordinal) or ordinal != index:
+            findings.append(
+                Finding(
+                    f"{prefix}_ATTEMPT_ORDER",
+                    f"{attempt_context}.ordinal must be integer {index}",
+                )
+            )
+        if not _is_enum_value(attempt.get("route"), ROUTE_RECEIPT_ROUTES - {"hold"}):
+            findings.append(Finding(f"{prefix}_ATTEMPT_ROUTE", f"{attempt_context}.route is invalid"))
+        if not _is_nonempty_text(attempt.get("requested_model")):
+            findings.append(
+                Finding(f"{prefix}_ATTEMPT_MODEL", f"{attempt_context}.requested_model must be non-empty text")
+            )
+        responding_model = attempt.get("responding_model")
+        if responding_model is not None and not _is_nonempty_text(responding_model):
+            findings.append(
+                Finding(f"{prefix}_ATTEMPT_MODEL", f"{attempt_context}.responding_model must be text or null")
+            )
+
+        outcome = attempt.get("outcome")
+        stage = attempt.get("failure_stage")
+        failure_category = attempt.get("failure_category")
+        quality_status = attempt.get("quality_status")
+        source_status = attempt.get("source_boundary_status")
+        safety_status = attempt.get("safety_boundary_status")
+        if not _is_enum_value(outcome, ROUTE_ATTEMPT_OUTCOMES):
+            findings.append(Finding(f"{prefix}_ATTEMPT_OUTCOME", f"{attempt_context}.outcome is invalid"))
+        if not _is_enum_value(stage, ROUTE_ATTEMPT_FAILURE_STAGES):
+            findings.append(Finding(f"{prefix}_ATTEMPT_STAGE", f"{attempt_context}.failure_stage is invalid"))
+        if not _is_enum_value(failure_category, failure_categories):
+            findings.append(
+                Finding(f"{prefix}_ATTEMPT_FAILURE_CATEGORY", f"{attempt_context}.failure_category is invalid")
+            )
+        if not _is_enum_value(quality_status, quality_statuses):
+            findings.append(Finding(f"{prefix}_ATTEMPT_QUALITY", f"{attempt_context}.quality_status is invalid"))
+        if not _is_enum_value(source_status, source_statuses):
+            findings.append(
+                Finding(f"{prefix}_ATTEMPT_SOURCE_BOUNDARY", f"{attempt_context}.source_boundary_status is invalid")
+            )
+        if not _is_enum_value(safety_status, safety_statuses):
+            findings.append(
+                Finding(f"{prefix}_ATTEMPT_SAFETY_BOUNDARY", f"{attempt_context}.safety_boundary_status is invalid")
+            )
+
+        semantics_ok = True
+        if outcome == "completed":
+            semantics_ok = (
+                stage == "none"
+                and failure_category == "none"
+                and responding_model is not None
+                and quality_status in {"assessed_pass", "assessed_fail"}
+                and source_status in {"not_applicable", "pass"}
+                and safety_status in {"not_applicable", "pass"}
+            )
+        elif outcome == "infrastructure_failure":
+            semantics_ok = (
+                stage in {"pre_request", "request_open", "response_stream"}
+                and failure_category == "infrastructure"
+                and quality_status == "not_assessed_runtime_failure"
+                and source_status in {"not_applicable", "not_assessed"}
+                and safety_status in {"not_applicable", "not_assessed"}
+            )
+        elif outcome == "validation_failure" and failure_category == "schema":
+            semantics_ok = (
+                stage == "validation"
+                and quality_status == "not_assessed_schema_failure"
+                and source_status in {"not_applicable", "not_assessed"}
+                and safety_status in {"not_applicable", "pass", "not_assessed"}
+            )
+        elif outcome == "validation_failure" and failure_category == "source_boundary":
+            semantics_ok = (
+                stage == "validation"
+                and quality_status == "not_assessed_source_boundary"
+                and source_status == "fail"
+                and safety_status in {"not_applicable", "pass", "not_assessed"}
+            )
+        elif outcome == "policy_rejected":
+            semantics_ok = (
+                stage == "policy"
+                and failure_category == "safety_policy"
+                and quality_status == "not_assessed_safety_policy"
+                and source_status in {"not_applicable", "pass", "not_assessed"}
+                and safety_status == "blocked"
+            )
+        if outcome in ROUTE_ATTEMPT_OUTCOMES and not semantics_ok:
+            findings.append(
+                Finding(
+                    f"{prefix}_ATTEMPT_SEMANTICS",
+                    f"{attempt_context}: outcome, failure, quality, and boundary evidence disagree",
+                )
+            )
+
+        fallback_from = attempt.get("fallback_from_attempt_id")
+        if index == 1:
+            if fallback_from is not None:
+                findings.append(
+                    Finding(f"{prefix}_FALLBACK_CHAIN", f"{attempt_context}: first attempt cannot be a fallback")
+                )
+        else:
+            previous_id = value[index - 2].get("attempt_id") if isinstance(value[index - 2], dict) else None
+            if fallback_from != previous_id:
+                findings.append(
+                    Finding(
+                        f"{prefix}_FALLBACK_CHAIN",
+                        f"{attempt_context}.fallback_from_attempt_id must reference the previous attempt",
+                    )
+                )
+
+        for field in ("input_tokens", "output_tokens"):
+            if not _is_nonnegative_int(attempt.get(field)):
+                findings.append(
+                    Finding(f"{prefix}_ATTEMPT_METRIC", f"{attempt_context}.{field} must be non-negative")
+                )
+        if not _is_finite_nonnegative_number(attempt.get("wall_seconds")):
+            findings.append(
+                Finding(f"{prefix}_ATTEMPT_METRIC", f"{attempt_context}.wall_seconds must be finite and non-negative")
+            )
+    return attempts
+
+
+def _validate_attempt_ground_truth_v1(ground_truth: dict[str, Any]) -> list[Finding]:
+    findings: list[Finding] = []
+    root_fields = {
+        "schema_version",
+        "case_id",
+        "execution_mode",
+        "model_called",
+        "network_called",
+        "state_mutating",
+        "policy_id",
+        "candidate_route",
+        "fallback_policy",
+        "attempts",
+        "final_attempt_id",
+        "final_model",
+        "completion_status",
+        "decision_disposition",
+        "final_quality_status",
+        "expected_writes",
+        "observed_writes",
+    }
+    _check_contract_fields(ground_truth, root_fields, "ground_truth", findings, prefix="GROUND_TRUTH")
+    if ground_truth.get("schema_version") != ATTEMPT_GROUND_TRUTH_SCHEMA_V1:
+        findings.append(
+            Finding(
+                "GROUND_TRUTH_SCHEMA_VERSION",
+                f"schema_version must be {ATTEMPT_GROUND_TRUTH_SCHEMA_V1}",
+            )
+        )
+    for field in ("case_id", "policy_id"):
+        if not _is_nonempty_text(ground_truth.get(field)):
+            findings.append(Finding("GROUND_TRUTH_STRING", f"ground_truth.{field} must be non-empty text"))
+    if not _is_enum_value(ground_truth.get("candidate_route"), ROUTE_RECEIPT_ROUTES - {"hold"}):
+        findings.append(Finding("GROUND_TRUTH_ROUTE", "ground_truth.candidate_route is invalid"))
+    _validate_synthetic_invariants(ground_truth, "ground_truth", findings, prefix="GROUND_TRUTH")
+
+    fallback_policy = ground_truth.get("fallback_policy")
+    allowed_transitions: list[dict[str, Any]] = []
+    max_attempts: int | None = None
+    if not isinstance(fallback_policy, dict):
+        findings.append(Finding("GROUND_TRUTH_FALLBACK_POLICY", "fallback_policy must be an object"))
+    else:
+        _check_contract_fields(
+            fallback_policy,
+            {"max_attempts", "allowed_transitions"},
+            "ground_truth.fallback_policy",
+            findings,
+            prefix="GROUND_TRUTH",
+        )
+        if (
+            not _is_nonnegative_int(fallback_policy.get("max_attempts"))
+            or fallback_policy.get("max_attempts", 0) < 1
+            or fallback_policy.get("max_attempts", 0) > 2
+        ):
+            findings.append(Finding("GROUND_TRUTH_FALLBACK_POLICY", "max_attempts must be 1 or 2"))
+        else:
+            max_attempts = fallback_policy["max_attempts"]
+        transitions = fallback_policy.get("allowed_transitions")
+        if not isinstance(transitions, list) or len(transitions) > 1:
+            findings.append(
+                Finding("GROUND_TRUTH_FALLBACK_POLICY", "allowed_transitions must contain at most one transition")
+            )
+        else:
+            if max_attempts == 1 and transitions:
+                findings.append(
+                    Finding("GROUND_TRUTH_FALLBACK_POLICY", "max_attempts 1 cannot allow a transition")
+                )
+            for index, transition in enumerate(transitions):
+                context = f"ground_truth.fallback_policy.allowed_transitions[{index}]"
+                if not isinstance(transition, dict):
+                    findings.append(Finding("GROUND_TRUTH_FALLBACK_POLICY", f"{context} must be an object"))
+                    continue
+                _check_contract_fields(
+                    transition,
+                    {
+                        "transition_id",
+                        "from_route",
+                        "to_route",
+                        "on_outcomes",
+                        "on_failure_categories",
+                    },
+                    context,
+                    findings,
+                    prefix="GROUND_TRUTH",
+                )
+                transition_ok = True
+                if not _is_nonempty_text(transition.get("transition_id")):
+                    transition_ok = False
+                if not _is_enum_value(transition.get("from_route"), ROUTE_RECEIPT_ROUTES - {"hold"}):
+                    transition_ok = False
+                if not _is_enum_value(transition.get("to_route"), ROUTE_RECEIPT_ROUTES - {"hold"}):
+                    transition_ok = False
+                outcomes = transition.get("on_outcomes")
+                if (
+                    not isinstance(outcomes, list)
+                    or not outcomes
+                    or any(not _is_enum_value(item, ROUTE_ATTEMPT_OUTCOMES - {"completed"}) for item in outcomes)
+                    or len(outcomes) != len(set(outcomes))
+                ):
+                    transition_ok = False
+                categories = transition.get("on_failure_categories")
+                if (
+                    not isinstance(categories, list)
+                    or not categories
+                    or any(
+                        not _is_enum_value(
+                            item,
+                            {"infrastructure", "schema", "source_boundary", "safety_policy"},
+                        )
+                        for item in categories
+                    )
+                    or len(categories) != len(set(categories))
+                ):
+                    transition_ok = False
+                if transition_ok:
+                    allowed_transitions.append(transition)
+                else:
+                    findings.append(Finding("GROUND_TRUTH_FALLBACK_POLICY", f"{context} is invalid"))
+
+    attempts = _validate_route_attempts_v1(
+        ground_truth.get("attempts"), findings, prefix="GROUND_TRUTH", context="ground_truth.attempts"
+    )
+    if attempts and ground_truth.get("candidate_route") != attempts[0].get("route"):
+        findings.append(
+            Finding("GROUND_TRUTH_CANDIDATE_ATTRIBUTION", "candidate_route must match the first attempt")
+        )
+    if max_attempts is not None and len(attempts) > max_attempts:
+        findings.append(Finding("GROUND_TRUTH_FALLBACK_POLICY", "attempt count exceeds max_attempts"))
+    for previous, current in zip(attempts, attempts[1:]):
+        allowed = any(
+            transition.get("from_route") == previous.get("route")
+            and transition.get("to_route") == current.get("route")
+            and previous.get("outcome") in transition.get("on_outcomes", [])
+            and previous.get("failure_category") in transition.get("on_failure_categories", [])
+            for transition in allowed_transitions
+        )
+        if not allowed:
+            findings.append(
+                Finding(
+                    "GROUND_TRUTH_FORBIDDEN_FALLBACK",
+                    f"fallback from {previous.get('route')} to {current.get('route')} is not permitted",
+                )
+            )
+
+    final_attempt: dict[str, Any] | None = None
+    final_attempt_id = ground_truth.get("final_attempt_id")
+    if not _is_nonempty_text(final_attempt_id):
+        findings.append(Finding("GROUND_TRUTH_FINAL_ATTEMPT", "final_attempt_id must be non-empty text"))
+    else:
+        final_attempt = next(
+            (attempt for attempt in attempts if attempt.get("attempt_id") == final_attempt_id),
+            None,
+        )
+        if final_attempt is None:
+            findings.append(Finding("GROUND_TRUTH_FINAL_ATTEMPT", "final_attempt_id must reference an attempt"))
+        elif final_attempt is not attempts[-1]:
+            findings.append(Finding("GROUND_TRUTH_FINAL_ATTEMPT", "final_attempt_id must reference the last attempt"))
+
+    final_model = ground_truth.get("final_model")
+    if final_model is not None and not _is_nonempty_text(final_model):
+        findings.append(Finding("GROUND_TRUTH_FINAL_MODEL", "final_model must be text or null"))
+    if final_attempt is not None and final_model != final_attempt.get("responding_model"):
+        findings.append(Finding("GROUND_TRUTH_FINAL_MODEL", "final_model must match the final responding model"))
+
+    completion_status = ground_truth.get("completion_status")
+    decision_disposition = ground_truth.get("decision_disposition")
+    final_quality_status = ground_truth.get("final_quality_status")
+    if not _is_enum_value(completion_status, ROUTE_RECEIPT_COMPLETION_STATUSES):
+        findings.append(Finding("GROUND_TRUTH_COMPLETION", "completion_status is invalid"))
+    if not _is_enum_value(decision_disposition, {"deliver", "hold"}):
+        findings.append(Finding("GROUND_TRUTH_DISPOSITION", "decision_disposition is invalid"))
+    if not _is_enum_value(final_quality_status, {"pass", "fail", "not_assessed"}):
+        findings.append(Finding("GROUND_TRUTH_QUALITY", "final_quality_status is invalid"))
+    if final_attempt is not None:
+        expected_completion = (
+            "completed_via_fallback"
+            if final_attempt.get("outcome") == "completed" and len(attempts) > 1
+            else "completed_without_fallback"
+            if final_attempt.get("outcome") == "completed"
+            else "hold"
+        )
+        expected_quality = (
+            "pass"
+            if final_attempt.get("quality_status") == "assessed_pass"
+            else "fail"
+            if final_attempt.get("quality_status") == "assessed_fail"
+            else "not_assessed"
+        )
+        expected_disposition = "deliver" if expected_quality == "pass" else "hold"
+        if completion_status != expected_completion:
+            findings.append(
+                Finding("GROUND_TRUTH_COMPLETION", f"completion_status must be {expected_completion}")
+            )
+        if final_quality_status != expected_quality:
+            findings.append(
+                Finding("GROUND_TRUTH_QUALITY", f"final_quality_status must be {expected_quality}")
+            )
+        if decision_disposition != expected_disposition:
+            findings.append(
+                Finding("GROUND_TRUTH_DISPOSITION", f"decision_disposition must be {expected_disposition}")
+            )
+
+    expected_writes = _validate_string_list(
+        ground_truth.get("expected_writes"),
+        "ground_truth.expected_writes",
+        findings,
+        code="GROUND_TRUTH_WRITES",
+    )
+    observed_writes = _validate_string_list(
+        ground_truth.get("observed_writes"),
+        "ground_truth.observed_writes",
+        findings,
+        code="GROUND_TRUTH_WRITES",
+    )
+    if expected_writes:
+        findings.append(Finding("GROUND_TRUTH_NON_MUTATION", "synthetic v1 cases cannot expect writes"))
+    if observed_writes:
+        findings.append(Finding("GROUND_TRUTH_NON_MUTATION", "synthetic v1 cases cannot observe writes"))
+    return findings
+
+
+def _expected_v1_fallback_transitions(attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(attempts) < 2:
+        return []
+    previous, current = attempts[0], attempts[1]
+    return [
+        {
+            "ordinal": 1,
+            "from_attempt_id": previous.get("attempt_id"),
+            "to_attempt_id": current.get("attempt_id"),
+            "from_route": previous.get("route"),
+            "to_route": current.get("route"),
+            "trigger_outcome": previous.get("outcome"),
+            "trigger_failure_category": previous.get("failure_category"),
+            "permitted": True,
+        }
+    ]
+
+
+def _validate_route_receipt_v1(receipt: dict[str, Any], ground_truth: dict[str, Any]) -> list[Finding]:
+    if _validate_attempt_ground_truth_v1(ground_truth):
+        return [Finding("RECEIPT_GROUND_TRUTH_INVALID", "attempt ground truth must validate first")]
+
+    findings: list[Finding] = []
+    root_fields = {
+        "schema_version",
+        "receipt_id",
+        "case_id",
+        "receipt_mode",
+        "execution_mode",
+        "model_called",
+        "network_called",
+        "state_mutating",
+        "policy_id",
+        "candidate_route",
+        "actual_route",
+        "attempts",
+        "final_attempt_id",
+        "final_model",
+        "completion_status",
+        "decision_disposition",
+        "fallback_transitions",
+        "quality",
+        "writes",
+        "finalization",
+        "enforcement_status",
+        "completion_claim",
+        "automatic_route_change",
+        "promotion_decision",
+    }
+    _check_contract_fields(receipt, root_fields, "receipt", findings, prefix="RECEIPT")
+    if receipt.get("schema_version") != ROUTE_RECEIPT_SCHEMA_V1:
+        findings.append(Finding("RECEIPT_SCHEMA_VERSION", f"schema_version must be {ROUTE_RECEIPT_SCHEMA_V1}"))
+    for field in ("receipt_id", "case_id", "policy_id"):
+        if not _is_nonempty_text(receipt.get(field)):
+            findings.append(Finding("RECEIPT_STRING", f"receipt.{field} must be non-empty text"))
+    mode = receipt.get("receipt_mode")
+    if not _is_enum_value(mode, {"passive", "enforced"}):
+        findings.append(Finding("RECEIPT_MODE", "receipt_mode must be passive or enforced"))
+    if not _is_enum_value(receipt.get("candidate_route"), ROUTE_RECEIPT_ROUTES - {"hold"}):
+        findings.append(Finding("RECEIPT_ROUTE", "candidate_route is invalid"))
+    if receipt.get("actual_route") != "none":
+        findings.append(Finding("RECEIPT_NON_EXECUTION", "actual_route must remain none"))
+    _validate_synthetic_invariants(receipt, "receipt", findings, prefix="RECEIPT")
+    if receipt.get("automatic_route_change") is not False:
+        findings.append(Finding("RECEIPT_PROMOTION", "automatic_route_change must be false"))
+    if receipt.get("promotion_decision") != "not_promoted":
+        findings.append(Finding("RECEIPT_PROMOTION", "promotion_decision must be not_promoted"))
+
+    for field in (
+        "case_id",
+        "execution_mode",
+        "model_called",
+        "network_called",
+        "state_mutating",
+        "policy_id",
+        "candidate_route",
+        "completion_status",
+        "decision_disposition",
+    ):
+        if receipt.get(field) != ground_truth.get(field):
+            findings.append(Finding("RECEIPT_GROUND_TRUTH_MISMATCH", f"receipt.{field} disagrees with ground truth"))
+
+    attempts = _validate_route_attempts_v1(
+        receipt.get("attempts"), findings, prefix="RECEIPT", context="receipt.attempts"
+    )
+    truth_attempts = ground_truth["attempts"]
+    attempts_by_id = {
+        attempt["attempt_id"]: attempt for attempt in attempts if _is_nonempty_text(attempt.get("attempt_id"))
+    }
+    truth_by_id = {attempt["attempt_id"]: attempt for attempt in truth_attempts}
+    for attempt_id in sorted(set(truth_by_id) - set(attempts_by_id)):
+        findings.append(Finding("RECEIPT_MISSING_ATTEMPT", f"receipt omits ground-truth attempt {attempt_id}"))
+    for attempt_id in sorted(set(attempts_by_id) - set(truth_by_id)):
+        findings.append(Finding("RECEIPT_EXTRA_ATTEMPT", f"receipt invents attempt {attempt_id}"))
+    for attempt_id in sorted(set(attempts_by_id) & set(truth_by_id)):
+        if attempts_by_id[attempt_id] != truth_by_id[attempt_id]:
+            findings.append(Finding("RECEIPT_ATTEMPT_MISMATCH", f"attempt {attempt_id} disagrees with ground truth"))
+
+    if receipt.get("final_attempt_id") != ground_truth.get("final_attempt_id"):
+        findings.append(Finding("RECEIPT_FINAL_ATTEMPT_ATTRIBUTION", "final_attempt_id disagrees with ground truth"))
+    if receipt.get("final_model") != ground_truth.get("final_model"):
+        findings.append(Finding("RECEIPT_FINAL_MODEL_ATTRIBUTION", "final_model disagrees with ground truth"))
+
+    transitions = receipt.get("fallback_transitions")
+    expected_transitions = _expected_v1_fallback_transitions(attempts)
+    if not isinstance(transitions, list) or len(transitions) > 1:
+        findings.append(Finding("RECEIPT_FALLBACK", "fallback_transitions must contain at most one transition"))
+    else:
+        transition_fields = {
+            "ordinal",
+            "from_attempt_id",
+            "to_attempt_id",
+            "from_route",
+            "to_route",
+            "trigger_outcome",
+            "trigger_failure_category",
+            "permitted",
+        }
+        for index, transition in enumerate(transitions):
+            context = f"receipt.fallback_transitions[{index}]"
+            if not isinstance(transition, dict):
+                findings.append(Finding("RECEIPT_FALLBACK", f"{context} must be an object"))
+                continue
+            _check_contract_fields(transition, transition_fields, context, findings, prefix="RECEIPT")
+            ordinal = transition.get("ordinal")
+            if not _is_nonnegative_int(ordinal) or ordinal != 1:
+                findings.append(Finding("RECEIPT_FALLBACK", f"{context}.ordinal must be integer 1"))
+            if transition.get("permitted") is not True:
+                findings.append(Finding("RECEIPT_FALLBACK", f"{context}.permitted must be true"))
+        if transitions != expected_transitions:
+            findings.append(
+                Finding("RECEIPT_FALLBACK_ATTRIBUTION", "fallback transitions disagree with the ordered attempts")
+            )
+        if len(attempts) > 1:
+            previous, current = attempts[0], attempts[1]
+            permitted = any(
+                transition.get("from_route") == previous.get("route")
+                and transition.get("to_route") == current.get("route")
+                and previous.get("outcome") in transition.get("on_outcomes", [])
+                and previous.get("failure_category") in transition.get("on_failure_categories", [])
+                for transition in ground_truth["fallback_policy"]["allowed_transitions"]
+            )
+            if not permitted:
+                findings.append(Finding("RECEIPT_FORBIDDEN_FALLBACK", "fallback transition is not permitted"))
+
+    quality = receipt.get("quality")
+    final_quality_status: str | None = None
+    if not isinstance(quality, dict):
+        findings.append(Finding("RECEIPT_QUALITY", "quality must be an object"))
+    else:
+        _check_contract_fields(
+            quality,
+            {"assessed_attempt_ids", "unassessed_attempts", "final_quality_status"},
+            "receipt.quality",
+            findings,
+            prefix="RECEIPT",
+        )
+        assessed = _validate_string_list(
+            quality.get("assessed_attempt_ids"),
+            "receipt.quality.assessed_attempt_ids",
+            findings,
+            code="RECEIPT_QUALITY",
+        )
+        unassessed_value = quality.get("unassessed_attempts")
+        unassessed: dict[str, str] = {}
+        if not isinstance(unassessed_value, list):
+            findings.append(Finding("RECEIPT_QUALITY", "unassessed_attempts must be a list"))
+        else:
+            for index, item in enumerate(unassessed_value):
+                context = f"receipt.quality.unassessed_attempts[{index}]"
+                if not isinstance(item, dict):
+                    findings.append(Finding("RECEIPT_QUALITY", f"{context} must be an object"))
+                    continue
+                _check_contract_fields(item, {"attempt_id", "reason"}, context, findings, prefix="RECEIPT")
+                attempt_id = item.get("attempt_id")
+                reason = item.get("reason")
+                if not _is_nonempty_text(attempt_id) or not _is_enum_value(
+                    reason,
+                    {"infrastructure", "schema", "source_boundary", "safety_policy"},
+                ):
+                    findings.append(Finding("RECEIPT_QUALITY", f"{context} is invalid"))
+                elif attempt_id in unassessed:
+                    findings.append(Finding("RECEIPT_QUALITY", f"{context}.attempt_id is duplicated"))
+                else:
+                    unassessed[attempt_id] = reason
+
+        expected_assessed = {
+            attempt.get("attempt_id")
+            for attempt in attempts
+            if _is_nonempty_text(attempt.get("attempt_id"))
+            and attempt.get("quality_status") in {"assessed_pass", "assessed_fail"}
+        }
+        expected_unassessed = {
+            attempt["attempt_id"]: attempt.get("failure_category")
+            for attempt in attempts
+            if _is_nonempty_text(attempt.get("attempt_id"))
+            and attempt.get("quality_status")
+            in {
+                "not_assessed_runtime_failure",
+                "not_assessed_schema_failure",
+                "not_assessed_source_boundary",
+                "not_assessed_safety_policy",
+            }
+        }
+        assessed_set = set(assessed or [])
+        if assessed_set & set(expected_unassessed):
+            findings.append(
+                Finding(
+                    "RECEIPT_UNASSESSED_QUALITY_CONTAMINATION",
+                    "an unassessed attempt appears in assessed quality evidence",
+                )
+            )
+        if assessed_set != expected_assessed or unassessed != expected_unassessed:
+            findings.append(Finding("RECEIPT_QUALITY_ATTRIBUTION", "quality attempt attribution is incomplete"))
+        final_quality_status = quality.get("final_quality_status")
+        if not _is_enum_value(final_quality_status, {"pass", "fail", "not_assessed"}):
+            findings.append(Finding("RECEIPT_QUALITY", "final_quality_status is invalid"))
+        elif final_quality_status != ground_truth.get("final_quality_status"):
+            findings.append(
+                Finding("RECEIPT_QUALITY_ATTRIBUTION", "final_quality_status disagrees with ground truth")
+            )
+
+    writes = receipt.get("writes")
+    computed_unexpected: set[str] = set()
+    if not isinstance(writes, dict):
+        findings.append(Finding("RECEIPT_WRITES", "writes must be an object"))
+    else:
+        _check_contract_fields(
+            writes,
+            {"expected", "observed", "unexpected"},
+            "receipt.writes",
+            findings,
+            prefix="RECEIPT",
+        )
+        expected = _validate_string_list(
+            writes.get("expected"), "receipt.writes.expected", findings, code="RECEIPT_WRITES"
+        )
+        observed = _validate_string_list(
+            writes.get("observed"), "receipt.writes.observed", findings, code="RECEIPT_WRITES"
+        )
+        unexpected = _validate_string_list(
+            writes.get("unexpected"), "receipt.writes.unexpected", findings, code="RECEIPT_WRITES"
+        )
+        if expected is not None and expected != ground_truth["expected_writes"]:
+            findings.append(Finding("RECEIPT_WRITE_ATTRIBUTION", "expected writes disagree with ground truth"))
+        if observed is not None and observed != ground_truth["observed_writes"]:
+            findings.append(Finding("RECEIPT_WRITE_ATTRIBUTION", "observed writes disagree with ground truth"))
+        if expected is not None and observed is not None:
+            computed_unexpected = set(observed) - set(expected)
+            if unexpected is not None and set(unexpected) != computed_unexpected:
+                findings.append(Finding("RECEIPT_WRITE_ATTRIBUTION", "unexpected writes are incomplete"))
+        if any((expected, observed, unexpected)):
+            findings.append(Finding("RECEIPT_NON_MUTATION", "synthetic v1 receipts cannot contain writes"))
+        if computed_unexpected:
+            findings.append(
+                Finding(
+                    "RECEIPT_UNEXPECTED_WRITES",
+                    f"unexpected writes observed: {', '.join(sorted(computed_unexpected))}",
+                )
+            )
+
+    finalization = receipt.get("finalization")
+    finalization_ok = False
+    if not isinstance(finalization, dict):
+        findings.append(Finding("RECEIPT_FINALIZATION", "finalization must be an object"))
+    else:
+        _check_contract_fields(
+            finalization,
+            {"status", "integrity_verified"},
+            "receipt.finalization",
+            findings,
+            prefix="RECEIPT",
+        )
+        finalization_ok = (
+            finalization.get("status") == "finalized" and finalization.get("integrity_verified") is True
+        )
+    if not finalization_ok:
+        findings.append(
+            Finding(
+                "RECEIPT_FINALIZATION_FAILURE",
+                "a receipt cannot validate after finalization or integrity failure",
+            )
+        )
+
+    disposition = receipt.get("decision_disposition")
+    if not _is_enum_value(disposition, {"deliver", "hold"}):
+        findings.append(Finding("RECEIPT_DISPOSITION", "decision_disposition is invalid"))
+    if mode == "passive":
+        if receipt.get("enforcement_status") != "not_applied" or receipt.get("completion_claim") != "observed_only":
+            findings.append(
+                Finding("RECEIPT_PASSIVE_AUTHORITY", "passive receipts may claim observed_only, not enforcement")
+            )
+    elif mode == "enforced":
+        expected_claim = "auditable_complete" if disposition == "deliver" else "auditable_hold"
+        if receipt.get("enforcement_status") != "pass" or receipt.get("completion_claim") != expected_claim:
+            findings.append(
+                Finding("RECEIPT_ENFORCEMENT", f"enforced {disposition} receipts must claim {expected_claim}")
+            )
+        if not finalization_ok or computed_unexpected:
+            findings.append(
+                Finding(
+                    "RECEIPT_ENFORCEMENT_FALSE_PASS",
+                    "enforcement cannot pass without finalization and write containment",
+                )
+            )
+        if disposition == "deliver" and final_quality_status != "pass":
+            findings.append(
+                Finding("RECEIPT_ENFORCEMENT_FALSE_PASS", "delivery requires passing final quality")
+            )
+        if disposition == "hold" and final_quality_status not in {"fail", "not_assessed"}:
+            findings.append(
+                Finding("RECEIPT_ENFORCEMENT_FALSE_PASS", "a hold cannot claim passing final quality")
+            )
+    return findings
+
+
+def validate_attempt_ground_truth(ground_truth: dict[str, Any]) -> list[Finding]:
+    version = ground_truth.get("schema_version")
+    if version == ATTEMPT_GROUND_TRUTH_SCHEMA:
+        return _validate_attempt_ground_truth_v0(ground_truth)
+    if version == ATTEMPT_GROUND_TRUTH_SCHEMA_V1:
+        return _validate_attempt_ground_truth_v1(ground_truth)
+    return [
+        Finding(
+            "GROUND_TRUTH_SCHEMA_VERSION",
+            "schema_version must be route_attempt_ground_truth_v0 or route_attempt_ground_truth_v1",
+        )
+    ]
+
+
+def validate_route_receipt(receipt: dict[str, Any], ground_truth: dict[str, Any]) -> list[Finding]:
+    if validate_attempt_ground_truth(ground_truth):
+        return [Finding("RECEIPT_GROUND_TRUTH_INVALID", "attempt ground truth must validate first")]
+
+    receipt_version = receipt.get("schema_version")
+    ground_truth_version = ground_truth.get("schema_version")
+    if receipt_version == ROUTE_RECEIPT_SCHEMA and ground_truth_version == ATTEMPT_GROUND_TRUTH_SCHEMA:
+        return _validate_route_receipt_v0(receipt, ground_truth)
+    if receipt_version == ROUTE_RECEIPT_SCHEMA_V1 and ground_truth_version == ATTEMPT_GROUND_TRUTH_SCHEMA_V1:
+        return _validate_route_receipt_v1(receipt, ground_truth)
+    if receipt_version not in {ROUTE_RECEIPT_SCHEMA, ROUTE_RECEIPT_SCHEMA_V1}:
+        return [
+            Finding(
+                "RECEIPT_SCHEMA_VERSION",
+                "schema_version must be route_receipt_v0 or route_receipt_v1",
+            )
+        ]
+    return [
+        Finding(
+            "RECEIPT_SCHEMA_VERSION_MISMATCH",
+            "receipt and ground truth schema versions must use the same exact contract generation",
+        )
+    ]
 
 
 def _is_nonnegative_int(value: object) -> bool:
@@ -1572,6 +2337,14 @@ ROUTE_RECEIPT_SELF_TEST_CASES = (
     "route_receipt_passive.json",
     "route_receipt_enforced.json",
 )
+ROUTE_RECEIPT_V1_POSITIVE_CASES = {
+    "p2_d01_ground_truth.json": ("p2_d01_enforced.json", "p2_d01_passive.json"),
+    "p2_m02_ground_truth.json": ("p2_m02_enforced.json",),
+    "p2_i03_ground_truth.json": ("p2_i03_enforced.json", "p2_i03_passive.json"),
+    "p2_q01_ground_truth.json": ("p2_q01_enforced.json",),
+    "p2_r01_ground_truth.json": ("p2_r01_enforced.json",),
+    "p2_s01_ground_truth.json": ("p2_s01_enforced.json",),
+}
 
 
 def check_path(path: Path) -> tuple[list[dict[str, Any]], list[Finding]]:
@@ -1653,6 +2426,24 @@ def run_self_test(root: Path) -> int:
         print(f"{'PASS' if receipt_ok else 'FAIL'} fixture {name}")
         failures += not receipt_ok
 
+    phase2_root = root / "examples" / "phase2"
+    for ground_truth_name, receipt_names in ROUTE_RECEIPT_V1_POSITIVE_CASES.items():
+        phase2_truth, phase2_truth_findings = load_attempt_ground_truth(
+            phase2_root / ground_truth_name
+        )
+        phase2_truth_ok = phase2_truth is not None and not phase2_truth_findings
+        print(f"{'PASS' if phase2_truth_ok else 'FAIL'} fixture phase2/{ground_truth_name}")
+        failures += not phase2_truth_ok
+        for name in receipt_names:
+            phase2_receipt, phase2_receipt_findings = load_route_receipt(phase2_root / name)
+            if phase2_receipt is not None and phase2_truth is not None:
+                phase2_receipt_findings.extend(
+                    validate_route_receipt(phase2_receipt, phase2_truth)
+                )
+            phase2_receipt_ok = phase2_receipt is not None and not phase2_receipt_findings
+            print(f"{'PASS' if phase2_receipt_ok else 'FAIL'} fixture phase2/{name}")
+            failures += not phase2_receipt_ok
+
     if failures:
         print(f"FAIL self_test {failures} expectations failed")
         return 1
@@ -1679,7 +2470,7 @@ def main() -> int:
         "validate-route-receipt",
         help="validate a synthetic route receipt against independent attempt ground truth",
     )
-    receipt_parser.add_argument("receipt", type=Path, help="synthetic route_receipt_v0 JSON")
+    receipt_parser.add_argument("receipt", type=Path, help="synthetic route_receipt_v0 or route_receipt_v1 JSON")
     receipt_parser.add_argument("ground_truth", type=Path, help="independent synthetic attempt ground truth JSON")
     args = parser.parse_args()
 
