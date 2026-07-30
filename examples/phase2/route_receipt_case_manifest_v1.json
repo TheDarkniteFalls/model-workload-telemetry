@@ -1,0 +1,327 @@
+{
+  "schema_version": "route_receipt_case_manifest_v1",
+  "manifest_id": "phase2-route-receipt-conformance-v1",
+  "cases": [
+    {
+      "case_id": "P2-D01",
+      "ground_truth": {
+        "path": "p2_d01_ground_truth.json",
+        "sha256": "d248620c530e52442b3e150011208177cff882c3f6d0e3bb9db00a4377dc0027"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-d01-enforced",
+          "mode": "enforced",
+          "path": "p2_d01_enforced.json",
+          "sha256": "55aae2b154a3e4f7b9ec401cb46f8711cb53e3fae2258e17eeedfccb52576dfd"
+        },
+        {
+          "receipt_id": "p2-d01-passive",
+          "mode": "passive",
+          "path": "p2_d01_passive.json",
+          "sha256": "006efc4d1d8ca7551933fc30cf364d411b58707dc29892db3a85bcc530f6b6cf"
+        }
+      ],
+      "mutations": [
+        {
+          "mutation_id": "invented_expected_write",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "writes",
+          "primary_finding_code": "RECEIPT_WRITE_ATTRIBUTION"
+        },
+        {
+          "mutation_id": "invented_observed_write",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "writes",
+          "primary_finding_code": "RECEIPT_WRITE_ATTRIBUTION"
+        },
+        {
+          "mutation_id": "omitted_unexpected_write",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "writes",
+          "primary_finding_code": "RECEIPT_WRITE_ATTRIBUTION"
+        },
+        {
+          "mutation_id": "failed_finalization",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "finalization",
+          "primary_finding_code": "RECEIPT_FINALIZATION_FAILURE"
+        },
+        {
+          "mutation_id": "unverified_finalization",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "finalization",
+          "primary_finding_code": "RECEIPT_FINALIZATION_FAILURE"
+        },
+        {
+          "mutation_id": "unknown_field",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "contract_robustness",
+          "primary_finding_code": "RECEIPT_UNKNOWN_FIELD"
+        },
+        {
+          "mutation_id": "duplicate_json_key",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "contract_robustness",
+          "primary_finding_code": "RECEIPT_JSON"
+        },
+        {
+          "mutation_id": "invalid_field_type",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "contract_robustness",
+          "primary_finding_code": "RECEIPT_ROUTE"
+        },
+        {
+          "mutation_id": "nonfinite_attempt_metric",
+          "base_receipt_id": "p2-d01-enforced",
+          "category": "contract_robustness",
+          "primary_finding_code": "RECEIPT_ATTEMPT_METRIC"
+        }
+      ]
+    },
+    {
+      "case_id": "P2-M01",
+      "ground_truth": {
+        "path": "p2_m01_ground_truth.json",
+        "sha256": "0c043511728d184d8be11bc1fc1f48edbd165c029860c518c64a412fbb0eab90"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-m01-enforced",
+          "mode": "enforced",
+          "path": "p2_m01_enforced.json",
+          "sha256": "783d9c6b4016432757d851c5fde91cbb2c1bc9654c0850a0d1cfb0611d0ae784"
+        }
+      ],
+      "mutations": []
+    },
+    {
+      "case_id": "P2-M02",
+      "ground_truth": {
+        "path": "p2_m02_ground_truth.json",
+        "sha256": "b0b94effbb606340ccc36583a7f884940e504ca6bd9f4c6fc1561bb7205b1092"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-m02-enforced",
+          "mode": "enforced",
+          "path": "p2_m02_enforced.json",
+          "sha256": "a112089060c1544c2e6248b1d511b3bf0b52f6a87e754e2102c1cc813ba10cdb"
+        }
+      ],
+      "mutations": [
+        {
+          "mutation_id": "missing_attempt",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "attempts",
+          "primary_finding_code": "RECEIPT_MISSING_ATTEMPT"
+        },
+        {
+          "mutation_id": "duplicated_attempt",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "attempts",
+          "primary_finding_code": "RECEIPT_ATTEMPT_ID"
+        },
+        {
+          "mutation_id": "reordered_attempts",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "attempts",
+          "primary_finding_code": "RECEIPT_ATTEMPT_ORDER"
+        },
+        {
+          "mutation_id": "invented_attempt",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "attempts",
+          "primary_finding_code": "RECEIPT_EXTRA_ATTEMPT"
+        },
+        {
+          "mutation_id": "candidate_route_mismatch",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "attempts",
+          "primary_finding_code": "RECEIPT_GROUND_TRUTH_MISMATCH"
+        },
+        {
+          "mutation_id": "final_attempt_not_last",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "attempts",
+          "primary_finding_code": "RECEIPT_FINAL_ATTEMPT_ATTRIBUTION"
+        },
+        {
+          "mutation_id": "final_model_mismatch",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "final_models",
+          "primary_finding_code": "RECEIPT_FINAL_MODEL_ATTRIBUTION"
+        },
+        {
+          "mutation_id": "fallback_wrong_trigger",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "fallback_transitions",
+          "primary_finding_code": "RECEIPT_FALLBACK_ATTRIBUTION"
+        },
+        {
+          "mutation_id": "fallback_absent_from_policy",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "fallback_transitions",
+          "primary_finding_code": "RECEIPT_FORBIDDEN_FALLBACK"
+        },
+        {
+          "mutation_id": "fallback_marked_unused",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "fallback_transitions",
+          "primary_finding_code": "RECEIPT_FALLBACK_ATTRIBUTION"
+        },
+        {
+          "mutation_id": "runtime_quality_contamination",
+          "base_receipt_id": "p2-m02-enforced",
+          "category": "quality_status",
+          "primary_finding_code": "RECEIPT_UNASSESSED_QUALITY_CONTAMINATION"
+        }
+      ]
+    },
+    {
+      "case_id": "P2-I01",
+      "ground_truth": {
+        "path": "p2_i01_ground_truth.json",
+        "sha256": "23ec50be92edfdb828b0d7d6c304574ea1c0288a26e961540ac37113023596d5"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-i01-enforced",
+          "mode": "enforced",
+          "path": "p2_i01_enforced.json",
+          "sha256": "1b5954ce11ba9f5cb00aeb1633a25d7dcfd2ba7b198bca29da8cf4fde5bb8a4d"
+        }
+      ],
+      "mutations": []
+    },
+    {
+      "case_id": "P2-I02",
+      "ground_truth": {
+        "path": "p2_i02_ground_truth.json",
+        "sha256": "43ff9510b179427869a1dbbd24a47f99172d214edcaebc7eab50b61c5b461ba0"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-i02-enforced",
+          "mode": "enforced",
+          "path": "p2_i02_enforced.json",
+          "sha256": "ccbe416006bcd87c42908ddcb777942b6571b8dd7b2b447dda405da61c728c9b"
+        }
+      ],
+      "mutations": []
+    },
+    {
+      "case_id": "P2-I03",
+      "ground_truth": {
+        "path": "p2_i03_ground_truth.json",
+        "sha256": "0acd69194f8177db0add27b346a21b3d073e9ccd2026629d21e849d603d167f7"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-i03-enforced",
+          "mode": "enforced",
+          "path": "p2_i03_enforced.json",
+          "sha256": "3e2c3647cbe927dd15d75fc4888303fbbef4f843f31eb36e23c37bf5a5c1afc7"
+        },
+        {
+          "receipt_id": "p2-i03-passive",
+          "mode": "passive",
+          "path": "p2_i03_passive.json",
+          "sha256": "f5eda91fe633f58acc05e889a447a9997463b30d78299f2cb55cb4efb290528f"
+        }
+      ],
+      "mutations": [
+        {
+          "mutation_id": "exhausted_hold_claimed_complete",
+          "base_receipt_id": "p2-i03-enforced",
+          "category": "enforced_false_pass",
+          "primary_finding_code": "RECEIPT_ENFORCEMENT"
+        },
+        {
+          "mutation_id": "passive_promoted_to_enforcement",
+          "base_receipt_id": "p2-i03-passive",
+          "category": "passive_authority",
+          "primary_finding_code": "RECEIPT_PASSIVE_AUTHORITY"
+        }
+      ]
+    },
+    {
+      "case_id": "P2-Q01",
+      "ground_truth": {
+        "path": "p2_q01_ground_truth.json",
+        "sha256": "d23722e96f2a37318ec4e2fca0df210d1a828865aa4d95d8943d73c170af3eae"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-q01-enforced",
+          "mode": "enforced",
+          "path": "p2_q01_enforced.json",
+          "sha256": "6bc2f43d9a2f096fe256a73c3f9c45130b8177cf5f82ab9eee946e66736f0bb1"
+        }
+      ],
+      "mutations": []
+    },
+    {
+      "case_id": "P2-R01",
+      "ground_truth": {
+        "path": "p2_r01_ground_truth.json",
+        "sha256": "0cf6bd8dcd7aea7654ed2c4e196c11f6989d6cb443496b8937aed8ffd4f97bd3"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-r01-enforced",
+          "mode": "enforced",
+          "path": "p2_r01_enforced.json",
+          "sha256": "c03cbede9be35b6dfe01385aa389fe550832844b7b1608c1cfe0594df8d0fdd9"
+        }
+      ],
+      "mutations": [
+        {
+          "mutation_id": "source_relabelled_as_quality",
+          "base_receipt_id": "p2-r01-enforced",
+          "category": "source_boundaries",
+          "primary_finding_code": "RECEIPT_ATTEMPT_MISMATCH"
+        }
+      ]
+    },
+    {
+      "case_id": "P2-R02",
+      "ground_truth": {
+        "path": "p2_r02_ground_truth.json",
+        "sha256": "3bd7197bfc9039dda24918114cfbc52f7c1e3799b3ce5a35db216a93ade34739"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-r02-enforced",
+          "mode": "enforced",
+          "path": "p2_r02_enforced.json",
+          "sha256": "63d85fd118bff42b6e3f6c1c81b2ba53361a238166d9e70fc7e348b7ac04e595"
+        }
+      ],
+      "mutations": []
+    },
+    {
+      "case_id": "P2-S01",
+      "ground_truth": {
+        "path": "p2_s01_ground_truth.json",
+        "sha256": "250fa9fcce29aa60c7deec88325aebac87374cb8ef111a51bb08df01a4b52292"
+      },
+      "receipts": [
+        {
+          "receipt_id": "p2-s01-enforced",
+          "mode": "enforced",
+          "path": "p2_s01_enforced.json",
+          "sha256": "071ef572e2b0f0887fd3241354feb9fa43fabf075c23b5f6139ad56c63134147"
+        }
+      ],
+      "mutations": [
+        {
+          "mutation_id": "safety_relabelled_as_runtime",
+          "base_receipt_id": "p2-s01-enforced",
+          "category": "safety_boundaries",
+          "primary_finding_code": "RECEIPT_ATTEMPT_MISMATCH"
+        }
+      ]
+    }
+  ]
+}

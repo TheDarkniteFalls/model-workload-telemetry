@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
 import math
 from collections import Counter, defaultdict
@@ -16,12 +18,15 @@ from typing import Any, Iterable
 MAX_JSONL_BYTES = 5_000_000
 MAX_POLICY_BYTES = 100_000
 MAX_ROUTE_RECEIPT_BYTES = 100_000
+MAX_ROUTE_RECEIPT_CASE_MANIFEST_BYTES = 500_000
 SHADOW_POLICY_SCHEMA = "shadow_route_policy_v0"
 SHADOW_REPORT_SCHEMA = "evidence_gated_shadow_route_report_v0"
 ROUTE_RECEIPT_SCHEMA = "route_receipt_v0"
 ATTEMPT_GROUND_TRUTH_SCHEMA = "route_attempt_ground_truth_v0"
 ROUTE_RECEIPT_SCHEMA_V1 = "route_receipt_v1"
 ATTEMPT_GROUND_TRUTH_SCHEMA_V1 = "route_attempt_ground_truth_v1"
+ROUTE_RECEIPT_CASE_MANIFEST_SCHEMA_V1 = "route_receipt_case_manifest_v1"
+ROUTE_RECEIPT_CONFORMANCE_REPORT_SCHEMA_V1 = "route_receipt_conformance_report_v1"
 ROUTE_RECEIPT_ROUTES = {
     "deterministic",
     "fast_small",
@@ -54,6 +59,62 @@ ROUTE_RECEIPT_COMPLETION_STATUSES = {
     "completed_without_fallback",
     "completed_via_fallback",
     "hold",
+}
+ROUTE_RECEIPT_MUTATION_CATEGORIES = {
+    "attempts",
+    "final_models",
+    "fallback_transitions",
+    "quality_status",
+    "source_boundaries",
+    "safety_boundaries",
+    "writes",
+    "passive_authority",
+    "enforced_false_pass",
+    "finalization",
+    "contract_robustness",
+}
+ROUTE_RECEIPT_ATTRIBUTION_CATEGORIES = (
+    "attempts",
+    "final_models",
+    "fallback_transitions",
+    "quality_status",
+    "source_boundaries",
+    "safety_boundaries",
+    "writes",
+)
+ROUTE_RECEIPT_AUTHORITY_CATEGORIES = (
+    "passive_authority",
+    "enforced_false_pass",
+)
+ROUTE_RECEIPT_OTHER_CATEGORIES = (
+    "finalization",
+    "contract_robustness",
+)
+ROUTE_RECEIPT_V1_MUTATION_IDS = {
+    "missing_attempt",
+    "duplicated_attempt",
+    "reordered_attempts",
+    "invented_attempt",
+    "candidate_route_mismatch",
+    "final_attempt_not_last",
+    "final_model_mismatch",
+    "fallback_wrong_trigger",
+    "fallback_absent_from_policy",
+    "fallback_marked_unused",
+    "runtime_quality_contamination",
+    "source_relabelled_as_quality",
+    "safety_relabelled_as_runtime",
+    "invented_expected_write",
+    "invented_observed_write",
+    "omitted_unexpected_write",
+    "exhausted_hold_claimed_complete",
+    "passive_promoted_to_enforcement",
+    "failed_finalization",
+    "unverified_finalization",
+    "unknown_field",
+    "duplicate_json_key",
+    "invalid_field_type",
+    "nonfinite_attempt_metric",
 }
 FIELDS = {
     "schema_version",
@@ -207,6 +268,268 @@ def load_route_receipt(path: Path) -> tuple[dict[str, Any] | None, list[Finding]
         json_code="RECEIPT_JSON",
         shape_code="RECEIPT_SHAPE",
     )
+
+
+def _is_sha256_digest(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _resolve_manifest_artifact(
+    manifest_path: Path,
+    artifact: object,
+    context: str,
+    findings: list[Finding],
+    *,
+    expected_fields: set[str] | None = None,
+) -> Path | None:
+    if not isinstance(artifact, dict):
+        findings.append(Finding("MANIFEST_ARTIFACT", f"{context} must be an object"))
+        return None
+    _check_contract_fields(
+        artifact,
+        expected_fields or {"path", "sha256"},
+        context,
+        findings,
+        prefix="MANIFEST",
+    )
+    relative_value = artifact.get("path")
+    digest = artifact.get("sha256")
+    if not _is_nonempty_text(relative_value):
+        findings.append(Finding("MANIFEST_ARTIFACT_PATH", f"{context}.path must be non-empty text"))
+        return None
+    if not _is_sha256_digest(digest):
+        findings.append(
+            Finding("MANIFEST_ARTIFACT_DIGEST", f"{context}.sha256 must be a lowercase SHA-256 digest")
+        )
+        return None
+
+    try:
+        relative_path = Path(relative_value)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            findings.append(
+                Finding("MANIFEST_ARTIFACT_PATH", f"{context}.path must stay within the manifest folder")
+            )
+            return None
+        base = manifest_path.resolve().parent
+        resolved = (base / relative_path).resolve()
+        resolved.relative_to(base)
+    except (OSError, RuntimeError, ValueError):
+        findings.append(Finding("MANIFEST_ARTIFACT_PATH", f"{context}.path resolves outside the manifest folder"))
+        return None
+    if not resolved.is_file():
+        findings.append(Finding("MANIFEST_ARTIFACT_MISSING", f"{context}.path does not name a file"))
+        return None
+    if resolved.stat().st_size > MAX_ROUTE_RECEIPT_BYTES:
+        findings.append(Finding("MANIFEST_ARTIFACT_SIZE", f"{context}.path exceeds one hundred kilobytes"))
+        return None
+    actual_digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    if actual_digest != digest:
+        findings.append(Finding("MANIFEST_ARTIFACT_DIGEST", f"{context}.sha256 disagrees with exact fixture bytes"))
+        return None
+    return resolved
+
+
+def validate_route_receipt_case_manifest(
+    manifest: dict[str, Any], manifest_path: Path
+) -> list[Finding]:
+    findings: list[Finding] = []
+    _check_contract_fields(
+        manifest,
+        {"schema_version", "manifest_id", "cases"},
+        "manifest",
+        findings,
+        prefix="MANIFEST",
+    )
+    if manifest.get("schema_version") != ROUTE_RECEIPT_CASE_MANIFEST_SCHEMA_V1:
+        findings.append(
+            Finding(
+                "MANIFEST_SCHEMA_VERSION",
+                f"schema_version must be {ROUTE_RECEIPT_CASE_MANIFEST_SCHEMA_V1}",
+            )
+        )
+    if not _is_nonempty_text(manifest.get("manifest_id")):
+        findings.append(Finding("MANIFEST_ID", "manifest_id must be non-empty text"))
+
+    cases = manifest.get("cases")
+    if not isinstance(cases, list) or not cases:
+        findings.append(Finding("MANIFEST_CASES", "cases must be a non-empty list"))
+        return findings
+
+    seen_case_ids: set[str] = set()
+    seen_receipt_ids: set[str] = set()
+    seen_mutation_ids: set[str] = set()
+    seen_paths: set[str] = set()
+    for case_index, case in enumerate(cases):
+        case_context = f"manifest.cases[{case_index}]"
+        if not isinstance(case, dict):
+            findings.append(Finding("MANIFEST_CASE", f"{case_context} must be an object"))
+            continue
+        _check_contract_fields(
+            case,
+            {"case_id", "ground_truth", "receipts", "mutations"},
+            case_context,
+            findings,
+            prefix="MANIFEST",
+        )
+        case_id = case.get("case_id")
+        if not _is_nonempty_text(case_id):
+            findings.append(Finding("MANIFEST_CASE_ID", f"{case_context}.case_id must be non-empty text"))
+        elif case_id in seen_case_ids:
+            findings.append(Finding("MANIFEST_CASE_ID", f"duplicate case_id {case_id}"))
+        else:
+            seen_case_ids.add(case_id)
+
+        truth_spec = case.get("ground_truth")
+        truth_path = _resolve_manifest_artifact(
+            manifest_path,
+            truth_spec,
+            f"{case_context}.ground_truth",
+            findings,
+        )
+        if isinstance(truth_spec, dict) and _is_nonempty_text(truth_spec.get("path")):
+            if truth_spec["path"] in seen_paths:
+                findings.append(Finding("MANIFEST_ARTIFACT_PATH", f"duplicate artifact path {truth_spec['path']}"))
+            seen_paths.add(truth_spec["path"])
+        if truth_path is not None:
+            ground_truth, truth_findings = load_attempt_ground_truth(truth_path)
+            if truth_findings:
+                for finding in truth_findings:
+                    findings.append(
+                        Finding(
+                            "MANIFEST_GROUND_TRUTH_INVALID",
+                            f"{case_context}: {finding.code} {finding.message}",
+                        )
+                    )
+            elif ground_truth is not None and (
+                ground_truth.get("schema_version") != ATTEMPT_GROUND_TRUTH_SCHEMA_V1
+                or ground_truth.get("case_id") != case_id
+            ):
+                findings.append(
+                    Finding(
+                        "MANIFEST_GROUND_TRUTH_IDENTITY",
+                        f"{case_context}.ground_truth must be v1 truth for {case_id}",
+                    )
+                )
+
+        receipts = case.get("receipts")
+        local_receipt_ids: set[str] = set()
+        if not isinstance(receipts, list) or not receipts:
+            findings.append(Finding("MANIFEST_RECEIPTS", f"{case_context}.receipts must be a non-empty list"))
+            receipts = []
+        for receipt_index, receipt_spec in enumerate(receipts):
+            receipt_context = f"{case_context}.receipts[{receipt_index}]"
+            if not isinstance(receipt_spec, dict):
+                findings.append(Finding("MANIFEST_RECEIPT", f"{receipt_context} must be an object"))
+                continue
+            receipt_id = receipt_spec.get("receipt_id")
+            mode = receipt_spec.get("mode")
+            if not _is_nonempty_text(receipt_id):
+                findings.append(Finding("MANIFEST_RECEIPT_ID", f"{receipt_context}.receipt_id must be non-empty text"))
+            elif receipt_id in seen_receipt_ids:
+                findings.append(Finding("MANIFEST_RECEIPT_ID", f"duplicate receipt_id {receipt_id}"))
+            else:
+                seen_receipt_ids.add(receipt_id)
+                local_receipt_ids.add(receipt_id)
+            if not _is_enum_value(mode, {"passive", "enforced"}):
+                findings.append(Finding("MANIFEST_RECEIPT_MODE", f"{receipt_context}.mode is invalid"))
+            receipt_path = _resolve_manifest_artifact(
+                manifest_path,
+                receipt_spec,
+                receipt_context,
+                findings,
+                expected_fields={"receipt_id", "mode", "path", "sha256"},
+            )
+            if _is_nonempty_text(receipt_spec.get("path")):
+                if receipt_spec["path"] in seen_paths:
+                    findings.append(Finding("MANIFEST_ARTIFACT_PATH", f"duplicate artifact path {receipt_spec['path']}"))
+                seen_paths.add(receipt_spec["path"])
+            if receipt_path is not None:
+                receipt, receipt_findings = load_route_receipt(receipt_path)
+                if receipt_findings:
+                    for finding in receipt_findings:
+                        findings.append(
+                            Finding(
+                                "MANIFEST_RECEIPT_INVALID",
+                                f"{receipt_context}: {finding.code} {finding.message}",
+                            )
+                        )
+                elif receipt is not None and (
+                    receipt.get("schema_version") != ROUTE_RECEIPT_SCHEMA_V1
+                    or receipt.get("receipt_id") != receipt_id
+                    or receipt.get("case_id") != case_id
+                    or receipt.get("receipt_mode") != mode
+                ):
+                    findings.append(
+                        Finding(
+                            "MANIFEST_RECEIPT_IDENTITY",
+                            f"{receipt_context} identity disagrees with the referenced receipt",
+                        )
+                    )
+
+        mutations = case.get("mutations")
+        if not isinstance(mutations, list):
+            findings.append(Finding("MANIFEST_MUTATIONS", f"{case_context}.mutations must be a list"))
+            mutations = []
+        for mutation_index, mutation in enumerate(mutations):
+            mutation_context = f"{case_context}.mutations[{mutation_index}]"
+            if not isinstance(mutation, dict):
+                findings.append(Finding("MANIFEST_MUTATION", f"{mutation_context} must be an object"))
+                continue
+            _check_contract_fields(
+                mutation,
+                {"mutation_id", "base_receipt_id", "category", "primary_finding_code"},
+                mutation_context,
+                findings,
+                prefix="MANIFEST",
+            )
+            mutation_id = mutation.get("mutation_id")
+            base_receipt_id = mutation.get("base_receipt_id")
+            category = mutation.get("category")
+            primary_code = mutation.get("primary_finding_code")
+            if not _is_nonempty_text(mutation_id):
+                findings.append(Finding("MANIFEST_MUTATION_ID", f"{mutation_context}.mutation_id must be non-empty text"))
+            elif mutation_id in seen_mutation_ids:
+                findings.append(Finding("MANIFEST_MUTATION_ID", f"duplicate mutation_id {mutation_id}"))
+            else:
+                seen_mutation_ids.add(mutation_id)
+                if mutation_id not in ROUTE_RECEIPT_V1_MUTATION_IDS:
+                    findings.append(Finding("MANIFEST_MUTATION_UNSUPPORTED", f"unsupported mutation_id {mutation_id}"))
+            if base_receipt_id not in local_receipt_ids:
+                findings.append(
+                    Finding(
+                        "MANIFEST_MUTATION_BASE",
+                        f"{mutation_context}.base_receipt_id must name a receipt in the same case",
+                    )
+                )
+            if not _is_enum_value(category, ROUTE_RECEIPT_MUTATION_CATEGORIES):
+                findings.append(Finding("MANIFEST_MUTATION_CATEGORY", f"{mutation_context}.category is invalid"))
+            if not _is_nonempty_text(primary_code):
+                findings.append(
+                    Finding(
+                        "MANIFEST_MUTATION_FINDING",
+                        f"{mutation_context}.primary_finding_code must be non-empty text",
+                    )
+                )
+    return findings
+
+
+def load_route_receipt_case_manifest(path: Path) -> tuple[dict[str, Any] | None, list[Finding]]:
+    if not path.is_file():
+        return None, [Finding("MANIFEST_FILE_MISSING", f"case manifest does not exist: {path}")]
+    if path.stat().st_size > MAX_ROUTE_RECEIPT_CASE_MANIFEST_BYTES:
+        return None, [Finding("MANIFEST_FILE_SIZE", "case manifest exceeds five hundred kilobytes")]
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return None, [Finding("MANIFEST_JSON", str(exc))]
+    if not isinstance(value, dict):
+        return None, [Finding("MANIFEST_SHAPE", "case manifest must be a JSON object")]
+    findings = validate_route_receipt_case_manifest(value, path)
+    return value, findings
 
 
 def _check_contract_fields(
@@ -1631,6 +1954,311 @@ def validate_route_receipt(receipt: dict[str, Any], ground_truth: dict[str, Any]
     ]
 
 
+def _run_route_receipt_v1_mutation(
+    mutation_id: str,
+    receipt: dict[str, Any],
+    ground_truth: dict[str, Any],
+    receipt_text: str,
+) -> list[Finding]:
+    if mutation_id == "duplicate_json_key":
+        mutated_text = receipt_text.replace(
+            "{",
+            '{"schema_version":"route_receipt_v1",',
+            1,
+        )
+        try:
+            value = json.loads(mutated_text, object_pairs_hook=_reject_duplicate_keys)
+        except (ValueError, json.JSONDecodeError) as exc:
+            return [Finding("RECEIPT_JSON", str(exc))]
+        if not isinstance(value, dict):
+            return [Finding("RECEIPT_SHAPE", "route receipt must be a JSON object")]
+        return validate_route_receipt(value, ground_truth)
+
+    mutated = copy.deepcopy(receipt)
+    if mutation_id == "missing_attempt":
+        mutated["attempts"].pop(0)
+    elif mutation_id == "duplicated_attempt":
+        mutated["attempts"][1] = copy.deepcopy(mutated["attempts"][0])
+    elif mutation_id == "reordered_attempts":
+        mutated["attempts"].reverse()
+    elif mutation_id == "invented_attempt":
+        invented_id = "p2-m02-invented-attempt"
+        mutated["attempts"][1]["attempt_id"] = invented_id
+        mutated["final_attempt_id"] = invented_id
+        mutated["fallback_transitions"][0]["to_attempt_id"] = invented_id
+        mutated["quality"]["assessed_attempt_ids"] = [invented_id]
+    elif mutation_id == "candidate_route_mismatch":
+        mutated["candidate_route"] = "deep_comparison"
+    elif mutation_id == "final_attempt_not_last":
+        mutated["final_attempt_id"] = mutated["attempts"][0]["attempt_id"]
+    elif mutation_id == "final_model_mismatch":
+        mutated["final_model"] = mutated["attempts"][0]["requested_model"]
+    elif mutation_id == "fallback_wrong_trigger":
+        mutated["fallback_transitions"][0]["trigger_outcome"] = "validation_failure"
+    elif mutation_id == "fallback_absent_from_policy":
+        mutated["attempts"][1]["route"] = "deep_comparison"
+        mutated["fallback_transitions"][0]["to_route"] = "deep_comparison"
+    elif mutation_id == "fallback_marked_unused":
+        mutated["fallback_transitions"] = []
+    elif mutation_id == "runtime_quality_contamination":
+        mutated["quality"]["assessed_attempt_ids"].insert(
+            0,
+            mutated["attempts"][0]["attempt_id"],
+        )
+    elif mutation_id == "source_relabelled_as_quality":
+        attempt = mutated["attempts"][0]
+        attempt.update(
+            {
+                "outcome": "completed",
+                "failure_stage": "none",
+                "failure_category": "none",
+                "quality_status": "assessed_fail",
+                "source_boundary_status": "pass",
+            }
+        )
+        mutated["quality"] = {
+            "assessed_attempt_ids": [attempt["attempt_id"]],
+            "unassessed_attempts": [],
+            "final_quality_status": "fail",
+        }
+    elif mutation_id == "safety_relabelled_as_runtime":
+        attempt = mutated["attempts"][0]
+        attempt.update(
+            {
+                "outcome": "infrastructure_failure",
+                "failure_stage": "pre_request",
+                "failure_category": "infrastructure",
+                "quality_status": "not_assessed_runtime_failure",
+                "source_boundary_status": "not_assessed",
+                "safety_boundary_status": "not_assessed",
+            }
+        )
+        mutated["quality"]["unassessed_attempts"][0]["reason"] = "infrastructure"
+    elif mutation_id == "invented_expected_write":
+        mutated["writes"]["expected"] = ["state/expected.json"]
+    elif mutation_id == "invented_observed_write":
+        mutated["writes"]["observed"] = ["state/observed.json"]
+    elif mutation_id == "omitted_unexpected_write":
+        mutated["writes"]["observed"] = ["state/unexpected.json"]
+        mutated["writes"]["unexpected"] = []
+    elif mutation_id == "exhausted_hold_claimed_complete":
+        mutated["completion_claim"] = "auditable_complete"
+    elif mutation_id == "passive_promoted_to_enforcement":
+        mutated["enforcement_status"] = "pass"
+        mutated["completion_claim"] = "auditable_hold"
+    elif mutation_id == "failed_finalization":
+        mutated["finalization"] = {"status": "failed", "integrity_verified": False}
+    elif mutation_id == "unverified_finalization":
+        mutated["finalization"]["integrity_verified"] = False
+    elif mutation_id == "unknown_field":
+        mutated["invented_field"] = True
+    elif mutation_id == "invalid_field_type":
+        mutated["candidate_route"] = []
+    elif mutation_id == "nonfinite_attempt_metric":
+        mutated["attempts"][0]["wall_seconds"] = float("nan")
+    else:
+        raise ValueError(f"unsupported route-receipt mutation: {mutation_id}")
+    return validate_route_receipt(mutated, ground_truth)
+
+
+def _conformance_fraction(passed: int, total: int) -> dict[str, int]:
+    return {"passed": passed, "total": total}
+
+
+def build_route_receipt_conformance_report(
+    manifest_path: Path,
+) -> tuple[dict[str, Any] | None, list[Finding]]:
+    manifest, findings = load_route_receipt_case_manifest(manifest_path)
+    if manifest is None or findings:
+        return None, findings
+
+    base = manifest_path.resolve().parent
+    false_reject_case_ids: list[str] = []
+    false_reject_receipt_ids: list[str] = []
+    evidence_objects: list[dict[str, Any]] = []
+    receipt_objects: dict[str, dict[str, Any]] = {}
+    receipt_texts: dict[str, str] = {}
+    ground_truth_objects: dict[str, dict[str, Any]] = {}
+    accepted_receipt_total = 0
+
+    for case in manifest["cases"]:
+        case_id = case["case_id"]
+        truth_path = base / case["ground_truth"]["path"]
+        ground_truth, truth_findings = load_attempt_ground_truth(truth_path)
+        case_passed = ground_truth is not None and not truth_findings
+        if ground_truth is not None:
+            ground_truth_objects[case_id] = ground_truth
+            evidence_objects.append(ground_truth)
+        for receipt_spec in case["receipts"]:
+            accepted_receipt_total += 1
+            receipt_id = receipt_spec["receipt_id"]
+            receipt_path = base / receipt_spec["path"]
+            receipt, receipt_findings = load_route_receipt(receipt_path)
+            if receipt is not None:
+                receipt_objects[receipt_id] = receipt
+                receipt_texts[receipt_id] = receipt_path.read_text(encoding="utf-8")
+                evidence_objects.append(receipt)
+            validation_findings = list(receipt_findings)
+            if receipt is not None and ground_truth is not None:
+                validation_findings.extend(validate_route_receipt(receipt, ground_truth))
+            if validation_findings or receipt is None or ground_truth is None:
+                false_reject_receipt_ids.append(receipt_id)
+                case_passed = False
+        if not case_passed:
+            false_reject_case_ids.append(case_id)
+
+    mutation_total = 0
+    mutation_detected = 0
+    false_accept_ids: list[str] = []
+    primary_miss_ids: list[str] = []
+    validator_crash_ids: list[str] = []
+    category_totals: Counter[str] = Counter()
+    category_passed: Counter[str] = Counter()
+    for case in manifest["cases"]:
+        ground_truth = ground_truth_objects[case["case_id"]]
+        for mutation in case["mutations"]:
+            mutation_total += 1
+            mutation_id = mutation["mutation_id"]
+            category = mutation["category"]
+            primary_code = mutation["primary_finding_code"]
+            base_receipt_id = mutation["base_receipt_id"]
+            category_totals[category] += 1
+            try:
+                mutation_findings = _run_route_receipt_v1_mutation(
+                    mutation_id,
+                    receipt_objects[base_receipt_id],
+                    ground_truth,
+                    receipt_texts[base_receipt_id],
+                )
+            except Exception:
+                validator_crash_ids.append(mutation_id)
+                continue
+            codes = {finding.code for finding in mutation_findings}
+            if primary_code in codes:
+                mutation_detected += 1
+                category_passed[category] += 1
+            elif not mutation_findings:
+                false_accept_ids.append(mutation_id)
+            else:
+                primary_miss_ids.append(mutation_id)
+
+    actual_route = (
+        "none"
+        if all(receipt.get("actual_route") == "none" for receipt in receipt_objects.values())
+        else "invalid"
+    )
+    promotion_decision = (
+        "not_promoted"
+        if all(receipt.get("promotion_decision") == "not_promoted" for receipt in receipt_objects.values())
+        else "invalid"
+    )
+    non_execution = {
+        "model_called": any(item.get("model_called") is not False for item in evidence_objects),
+        "network_called": any(item.get("network_called") is not False for item in evidence_objects),
+        "state_mutating": any(item.get("state_mutating") is not False for item in evidence_objects),
+        "actual_route": actual_route,
+        "automatic_route_change": any(
+            receipt.get("automatic_route_change") is not False for receipt in receipt_objects.values()
+        ),
+        "promotion_decision": promotion_decision,
+    }
+    non_execution_ok = non_execution == {
+        "model_called": False,
+        "network_called": False,
+        "state_mutating": False,
+        "actual_route": "none",
+        "automatic_route_change": False,
+        "promotion_decision": "not_promoted",
+    }
+    accepted_case_total = len(manifest["cases"])
+    accepted_case_passed = accepted_case_total - len(false_reject_case_ids)
+    accepted_receipt_passed = accepted_receipt_total - len(false_reject_receipt_ids)
+    conformant = (
+        accepted_case_passed == accepted_case_total
+        and accepted_receipt_passed == accepted_receipt_total
+        and mutation_detected == mutation_total
+        and not false_accept_ids
+        and not primary_miss_ids
+        and not validator_crash_ids
+        and non_execution_ok
+    )
+
+    def category_report(names: Iterable[str]) -> dict[str, dict[str, int]]:
+        return {
+            name: _conformance_fraction(category_passed[name], category_totals[name])
+            for name in names
+        }
+
+    report = {
+        "schema_version": ROUTE_RECEIPT_CONFORMANCE_REPORT_SCHEMA_V1,
+        "case_manifest_version": manifest["schema_version"],
+        "case_manifest_id": manifest["manifest_id"],
+        "case_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "accepted_cases": {
+            "passed": accepted_case_passed,
+            "total": accepted_case_total,
+            "false_rejects": len(false_reject_case_ids),
+            "false_reject_case_ids": sorted(false_reject_case_ids),
+        },
+        "accepted_receipts": {
+            "passed": accepted_receipt_passed,
+            "total": accepted_receipt_total,
+            "false_rejects": len(false_reject_receipt_ids),
+            "false_reject_receipt_ids": sorted(false_reject_receipt_ids),
+        },
+        "negative_mutations": {
+            "detected": mutation_detected,
+            "total": mutation_total,
+            "false_accepts": len(false_accept_ids),
+            "false_accept_mutation_ids": sorted(false_accept_ids),
+            "primary_misses": len(primary_miss_ids),
+            "primary_miss_mutation_ids": sorted(primary_miss_ids),
+            "validator_crashes": len(validator_crash_ids),
+            "validator_crash_mutation_ids": sorted(validator_crash_ids),
+        },
+        "attribution": category_report(ROUTE_RECEIPT_ATTRIBUTION_CATEGORIES),
+        "authority": category_report(ROUTE_RECEIPT_AUTHORITY_CATEGORIES),
+        "other_checks": category_report(ROUTE_RECEIPT_OTHER_CATEGORIES),
+        "non_execution": non_execution,
+        "conformant": conformant,
+    }
+    return report, []
+
+
+def render_route_receipt_conformance_report(report: dict[str, Any]) -> str:
+    status = "PASS" if report["conformant"] else "FAIL"
+    cases = report["accepted_cases"]
+    receipts = report["accepted_receipts"]
+    mutations = report["negative_mutations"]
+    lines = [
+        f"{status} route_receipt_conformance manifest={report['case_manifest_id']}",
+        f"accepted_cases={cases['passed']}/{cases['total']} false_rejects={cases['false_rejects']}",
+        f"accepted_receipts={receipts['passed']}/{receipts['total']} false_rejects={receipts['false_rejects']}",
+        (
+            f"negative_mutations={mutations['detected']}/{mutations['total']} "
+            f"false_accepts={mutations['false_accepts']} primary_misses={mutations['primary_misses']} "
+            f"validator_crashes={mutations['validator_crashes']}"
+        ),
+    ]
+    for group_name in ("attribution", "authority", "other_checks"):
+        values = report[group_name]
+        rendered = " ".join(
+            f"{name}={counts['passed']}/{counts['total']}" for name, counts in values.items()
+        )
+        lines.append(f"{group_name} {rendered}")
+    non_execution = report["non_execution"]
+    lines.append(
+        "non_execution "
+        f"model_called={str(non_execution['model_called']).lower()} "
+        f"network_called={str(non_execution['network_called']).lower()} "
+        f"state_mutating={str(non_execution['state_mutating']).lower()} "
+        f"actual_route={non_execution['actual_route']} "
+        f"automatic_route_change={str(non_execution['automatic_route_change']).lower()} "
+        f"promotion_decision={non_execution['promotion_decision']}"
+    )
+    return "\n".join(lines)
+
+
 def _is_nonnegative_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
@@ -2337,16 +2965,6 @@ ROUTE_RECEIPT_SELF_TEST_CASES = (
     "route_receipt_passive.json",
     "route_receipt_enforced.json",
 )
-ROUTE_RECEIPT_V1_POSITIVE_CASES = {
-    "p2_d01_ground_truth.json": ("p2_d01_enforced.json", "p2_d01_passive.json"),
-    "p2_m02_ground_truth.json": ("p2_m02_enforced.json",),
-    "p2_i03_ground_truth.json": ("p2_i03_enforced.json", "p2_i03_passive.json"),
-    "p2_q01_ground_truth.json": ("p2_q01_enforced.json",),
-    "p2_r01_ground_truth.json": ("p2_r01_enforced.json",),
-    "p2_s01_ground_truth.json": ("p2_s01_enforced.json",),
-}
-
-
 def check_path(path: Path) -> tuple[list[dict[str, Any]], list[Finding]]:
     records, load_findings = load_records(path)
     return records, load_findings + validate_records(records)
@@ -2426,23 +3044,18 @@ def run_self_test(root: Path) -> int:
         print(f"{'PASS' if receipt_ok else 'FAIL'} fixture {name}")
         failures += not receipt_ok
 
-    phase2_root = root / "examples" / "phase2"
-    for ground_truth_name, receipt_names in ROUTE_RECEIPT_V1_POSITIVE_CASES.items():
-        phase2_truth, phase2_truth_findings = load_attempt_ground_truth(
-            phase2_root / ground_truth_name
-        )
-        phase2_truth_ok = phase2_truth is not None and not phase2_truth_findings
-        print(f"{'PASS' if phase2_truth_ok else 'FAIL'} fixture phase2/{ground_truth_name}")
-        failures += not phase2_truth_ok
-        for name in receipt_names:
-            phase2_receipt, phase2_receipt_findings = load_route_receipt(phase2_root / name)
-            if phase2_receipt is not None and phase2_truth is not None:
-                phase2_receipt_findings.extend(
-                    validate_route_receipt(phase2_receipt, phase2_truth)
-                )
-            phase2_receipt_ok = phase2_receipt is not None and not phase2_receipt_findings
-            print(f"{'PASS' if phase2_receipt_ok else 'FAIL'} fixture phase2/{name}")
-            failures += not phase2_receipt_ok
+    phase2_manifest_path = root / "examples" / "phase2" / "route_receipt_case_manifest_v1.json"
+    phase2_report, phase2_findings = build_route_receipt_conformance_report(phase2_manifest_path)
+    phase2_ok = (
+        phase2_report is not None
+        and not phase2_findings
+        and phase2_report["conformant"] is True
+        and phase2_report["accepted_cases"]["passed"] == 10
+        and phase2_report["accepted_receipts"]["passed"] == 12
+        and phase2_report["negative_mutations"]["detected"] == 24
+    )
+    print(f"{'PASS' if phase2_ok else 'FAIL'} phase2_route_receipt_conformance")
+    failures += not phase2_ok
 
     if failures:
         print(f"FAIL self_test {failures} expectations failed")
@@ -2472,13 +3085,22 @@ def main() -> int:
     )
     receipt_parser.add_argument("receipt", type=Path, help="synthetic route_receipt_v0 or route_receipt_v1 JSON")
     receipt_parser.add_argument("ground_truth", type=Path, help="independent synthetic attempt ground truth JSON")
+    conformance_parser = subparsers.add_parser(
+        "route-receipt-conformance",
+        help="run a declared synthetic route-receipt conformance manifest",
+    )
+    conformance_parser.add_argument("manifest", type=Path, help="digest-bound route-receipt case manifest")
+    conformance_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent
     if args.self_test:
         return run_self_test(root)
     if args.command is None:
-        parser.error("choose validate, report, shadow-route, validate-route-receipt, or --self-test")
+        parser.error(
+            "choose validate, report, shadow-route, validate-route-receipt, "
+            "route-receipt-conformance, or --self-test"
+        )
 
     if args.command == "validate-route-receipt":
         ground_truth, findings = load_attempt_ground_truth(args.ground_truth.resolve())
@@ -2496,6 +3118,21 @@ def main() -> int:
             f"mode={receipt['receipt_mode']} claim={receipt['completion_claim']}"
         )
         return 0
+
+    if args.command == "route-receipt-conformance":
+        conformance_report, conformance_findings = build_route_receipt_conformance_report(
+            args.manifest.resolve()
+        )
+        if conformance_findings:
+            for finding in conformance_findings:
+                print(f"FAIL {finding.code} {finding.message}")
+            return 1
+        assert conformance_report is not None
+        if args.json:
+            print(json.dumps(conformance_report, indent=2, sort_keys=True, allow_nan=False))
+        else:
+            print(render_route_receipt_conformance_report(conformance_report))
+        return 0 if conformance_report["conformant"] else 1
 
     records, findings = check_path(args.path.resolve())
     if findings:

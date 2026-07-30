@@ -75,6 +75,8 @@ python3 -B model_workload_telemetry.py validate-route-receipt examples/route_rec
 python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_enforced.json examples/route_receipt_attempt_ground_truth.json
 python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_d01_enforced.json examples/phase2/p2_d01_ground_truth.json
 python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_i03_enforced.json examples/phase2/p2_i03_ground_truth.json
+python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json
+python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json --json
 python3 -B model_workload_telemetry.py --self-test
 python3 -B -m unittest discover -s tests -v
 ```
@@ -192,32 +194,47 @@ They preserve exact version identity and formalize deliver-versus-hold,
 per-attempt boundary evidence, and ordered fallback attribution without
 changing the frozen v0 contract.
 
-The smallest Phase 2 positive conformance slice is now runnable. Exact version
-dispatch keeps v0 inputs on the unchanged v0 validator and reconciles v1
-receipts only against v1 attempt ground truth. The synthetic matrix contains:
+Phase 2 synthetic conformance is now runnable. Exact version dispatch keeps v0
+inputs on the unchanged v0 validator and reconciles v1 receipts only against
+v1 attempt ground truth. The accepted matrix contains:
 
 | Case | Positive path | Enforced claim | Passive companion |
 | --- | --- | --- | --- |
 | `P2-D01` | direct deterministic delivery | `auditable_complete` | yes |
-| `P2-M02` | permitted runtime fallback delivery | `auditable_complete` | no |
+| `P2-M01` | direct fast-route delivery | `auditable_complete` | no |
+| `P2-M02` | pre-request failure, then permitted fallback delivery | `auditable_complete` | no |
+| `P2-I01` | request-open failure, then permitted fallback delivery | `auditable_complete` | no |
+| `P2-I02` | response-stream failure, then permitted fallback delivery | `auditable_complete` | no |
 | `P2-I03` | runtime fallback exhaustion hold | `auditable_hold` | yes |
 | `P2-Q01` | completed response with assessed-fail quality | `auditable_hold` | no |
 | `P2-R01` | source-boundary validation hold | `auditable_hold` | no |
+| `P2-R02` | required source unavailable before acceptance | `auditable_hold` | no |
 | `P2-S01` | safety-policy hold before a response | `auditable_hold` | no |
 
 The passive companions use the same attempt evidence while remaining limited
 to `observed_only`; changing receipt mode does not upgrade authority. Every
-case keeps model, network, mutation, actual-route, automatic-route-change, and
-promotion indicators disabled.
+case keeps model, network, state-mutation, actual-route,
+automatic-route-change, and promotion indicators disabled.
 
-Current negative mutation coverage is limited to four deterministic in-memory
-P2-M02 attempt and fallback attribution mutations; it does not include negative
-fixture files, aggregate reporting, workload expansion, comparative reliability
-evidence, or live routing. The
-docs-only
-[Phase 2 proposal](docs/route_receipt_phase2_proposal.md) describes that
-larger possible expansion. Nothing in the current repository represents
-production traffic or establishes production readiness.
+The strict
+[`route_receipt_case_manifest_v1` schema](schemas/route_receipt_case_manifest_v1.schema.json)
+defines the denominator, and the
+[`Phase 2 manifest`](examples/phase2/route_receipt_case_manifest_v1.json)
+binds each truth and receipt to the SHA-256 digest of its exact bytes. The
+report does not discover extra files at runtime.
+
+For the published manifest, the deterministic report validates `10/10`
+accepted cases and `12/12` accepted receipts and detects `24/24` declared
+in-memory mutations with their primary finding codes. `P2-S02` and `P2-F01`
+are represented as unexpected-write and finalization mutations rather than
+negative fixture files. `P2-A01` is covered across the paired passive and
+enforced delivery and hold receipts. The
+[Phase 2 design and acceptance record](docs/route_receipt_phase2_proposal.md)
+documents the full boundary.
+
+These exact counts describe only the declared synthetic corpus. They are not a
+reliability estimate, do not generalize statistically, and do not establish
+production readiness, better routing, or better model quality.
 
 ## What A Report Does Not Prove
 

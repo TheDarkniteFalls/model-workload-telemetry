@@ -1,0 +1,60 @@
+{
+  "schema_version": "route_receipt_v1",
+  "receipt_id": "p2-r02-enforced",
+  "case_id": "P2-R02",
+  "receipt_mode": "enforced",
+  "execution_mode": "synthetic_replay",
+  "model_called": false,
+  "network_called": false,
+  "state_mutating": false,
+  "policy_id": "synthetic-route-receipt-phase2-v1",
+  "candidate_route": "deep_comparison",
+  "actual_route": "none",
+  "attempts": [
+    {
+      "attempt_id": "p2-r02-attempt-1",
+      "ordinal": 1,
+      "route": "deep_comparison",
+      "requested_model": "research-c",
+      "responding_model": null,
+      "outcome": "validation_failure",
+      "failure_stage": "validation",
+      "failure_category": "source_boundary",
+      "quality_status": "not_assessed_source_boundary",
+      "source_boundary_status": "fail",
+      "safety_boundary_status": "pass",
+      "fallback_from_attempt_id": null,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "wall_seconds": 0.05
+    }
+  ],
+  "final_attempt_id": "p2-r02-attempt-1",
+  "final_model": null,
+  "completion_status": "hold",
+  "decision_disposition": "hold",
+  "fallback_transitions": [],
+  "quality": {
+    "assessed_attempt_ids": [],
+    "unassessed_attempts": [
+      {
+        "attempt_id": "p2-r02-attempt-1",
+        "reason": "source_boundary"
+      }
+    ],
+    "final_quality_status": "not_assessed"
+  },
+  "writes": {
+    "expected": [],
+    "observed": [],
+    "unexpected": []
+  },
+  "finalization": {
+    "status": "finalized",
+    "integrity_verified": true
+  },
+  "enforcement_status": "pass",
+  "completion_claim": "auditable_hold",
+  "automatic_route_change": false,
+  "promotion_decision": "not_promoted"
+}
