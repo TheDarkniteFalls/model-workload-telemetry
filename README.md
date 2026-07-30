@@ -37,6 +37,31 @@ A more useful comparison asks:
   quality, or human revision burden?
 - How much time, context, and revision did a successful result require?
 
+## Lessons Demonstrated
+
+This repository turns a few practical routing lessons into inspectable,
+synthetic examples:
+
+- Compare models only on task IDs they both attempted within the same workload
+  class. Raw totals mostly measure workload mix.
+- Apply route gates to exact, unrounded measurements. Round values only when
+  presenting the report.
+- Treat `hold` as an explicit outcome when evidence is missing, runtime work is
+  incomplete, or a declared boundary blocks delivery.
+- Keep runtime, schema, source-boundary, safety, and answer-quality outcomes
+  separate. A failed request is not evidence of a poor answer.
+- Attribute fallback to the complete ordered attempt chain and to the model
+  that actually produced the final response.
+- Check receipts against independently authored attempt ground truth so the
+  receipt does not supply its own expected result.
+- Separate observation from authority: passive receipts describe what was
+  observed, while enforced receipts need complete evidence before claiming an
+  auditable delivery or hold.
+
+These examples demonstrate reviewable evidence patterns. They do not establish
+that this harness is more reliable than a simple task-class router or that a
+route improves answer quality.
+
 ## Run
 
 Requires Python 3.10 or newer.
@@ -157,9 +182,22 @@ This is a proposal-compatible validation surface, not a router. It does not
 expand the workload set, call or select a live model, retry a request, change a
 default, persist a receipt, or promote a route.
 
-The docs-only [Phase 2 proposal](docs/route_receipt_phase2_proposal.md) defines
-a possible synthetic coverage expansion, acceptance gates, and public-claim
-boundary. It does not authorize or implement that expansion.
+The published v1 contracts are the
+[`route_receipt_v1` schema](schemas/route_receipt_v1.schema.json) and the
+independent
+[`route_attempt_ground_truth_v1` schema](schemas/route_attempt_ground_truth_v1.schema.json).
+They preserve exact version identity and formalize deliver-versus-hold,
+per-attempt boundary evidence, and ordered fallback attribution without
+changing the frozen v0 contract.
+
+Current maturity is intentionally narrow: the v0 validation path and fixtures
+are runnable, and the v1 contracts are published. Expanded Phase 2 fixtures,
+mutation coverage, comparative reliability evidence, and live routing are not
+implemented. The docs-only
+[Phase 2 proposal](docs/route_receipt_phase2_proposal.md) describes that
+possible synthetic expansion; it does not authorize or implement it. Nothing
+in the current repository represents production traffic or establishes
+production readiness.
 
 ## What A Report Does Not Prove
 
