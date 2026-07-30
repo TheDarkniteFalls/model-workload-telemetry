@@ -1,7 +1,7 @@
 # Route Receipt Validation Phase 2 Proposal
 
-- Status: proposal only
-- Implementation authority: closed
+- Status: implemented synthetic conformance
+- Implementation authority: completed and closed
 - Runtime authority: none
 
 ## Decision Summary
@@ -21,8 +21,23 @@ The recommended design is to:
 5. report deterministic conformance counts without claiming production
    reliability or superiority over a simple task-class router.
 
-This document does not authorize schemas, fixtures, tests, commands, network
-access, model calls, state changes, or live routing.
+The completed implementation remains limited to reviewed synthetic schemas,
+fixtures, validation, mutations, and reporting. It grants no authority for
+network access, model calls, state changes, or live routing.
+
+## Implementation Outcome
+
+The implemented matrix contains 10 accepted logical cases and 12 accepted
+receipts bound to independent ground truth by the strict
+`route_receipt_case_manifest_v1` contract and SHA-256 digests of exact fixture
+bytes. Its deterministic `route_receipt_conformance_report_v1` output accepts
+`10/10` cases and `12/12` receipts and detects `24/24` declared in-memory
+mutations with their primary finding codes.
+
+`P2-S02` and `P2-F01` are implemented as unexpected-write and finalization
+mutations rather than committed negative fixtures. `P2-A01` is covered by the
+paired passive and enforced delivery and hold receipts. The report remains
+offline, non-executing, non-mutating, and bounded to its declared manifest.
 
 ## Why Phase 2 Exists
 
@@ -269,7 +284,7 @@ generator version, and exact sample size.
 
 ## Acceptance Gates
 
-Phase 2 implementation would be complete only if all of these gates pass:
+Phase 2 implementation is complete only while all of these gates pass:
 
 1. All existing Phase 1 tests still pass unchanged.
 2. Every declared positive receipt validates against independent truth.
@@ -290,12 +305,12 @@ Phase 2 implementation would be complete only if all of these gates pass:
 12. No model, network, state mutation, route execution, default change, or
     promotion occurs.
 
-Any failure keeps Phase 2 in proposal or implementation status. It must not be
+Any future failure reopens Phase 2 implementation status. It must not be
 reframed as partial production readiness.
 
 ## Public Claim Boundary
 
-If all Phase 2 gates pass, the strongest defensible public claim is:
+With all Phase 2 gates passing, the strongest defensible public claim is:
 
 > In the published synthetic Phase 2 conformance matrix, the validator
 > accepted every declared valid delivery or hold receipt and detected every
@@ -318,20 +333,20 @@ with a frozen task-class-router baseline, representative workloads, repeated
 trials, controlled runtime failures, blinded or fixed quality assessment,
 predeclared metrics, and uncertainty reporting.
 
-## Proposed Implementation Slices After Approval
+## Implementation Record
 
-No slice below is authorized by this document.
+1. **Contract:** strict v1 receipt, ground-truth, and case-manifest schemas.
+2. **Positive cases:** 10 accepted synthetic cases and 12 receipts, with v0
+   behavior preserved.
+3. **Mutations:** 24 declared in-memory mutations with one primary finding
+   code each and no committed negative fixtures.
+4. **Reporting:** deterministic human and JSON conformance summaries whose
+   denominator comes only from the digest-bound manifest.
+5. **Publication:** full tests and public-safety gates are required before any
+   published change.
 
-1. **Contract slice:** add reviewed v1 receipt and ground-truth schemas only.
-2. **Positive-case slice:** add the smallest accepted synthetic cases and
-   preserve all Phase 1 tests.
-3. **Mutation slice:** add one focused negative mutation per named invariant.
-4. **Reporting slice:** add deterministic aggregate conformance output.
-5. **Publication slice:** run the full public safety gate and publish only
-   after an explicit review and authorization.
-
-Each slice should be independently reviewable and must stop if it requires a
-model call, network access, persistent state, live routing, or private data.
+The implementation contains no model call, network-dependent validation,
+persistent state, live routing, or private data.
 
 ## Deferred Beyond Phase 2
 
