@@ -1,0 +1,57 @@
+{
+  "schema_version": "route_receipt_v1",
+  "receipt_id": "p2-q01-enforced",
+  "case_id": "P2-Q01",
+  "receipt_mode": "enforced",
+  "execution_mode": "synthetic_replay",
+  "model_called": false,
+  "network_called": false,
+  "state_mutating": false,
+  "policy_id": "synthetic-route-receipt-phase2-v1",
+  "candidate_route": "primary_quality",
+  "actual_route": "none",
+  "attempts": [
+    {
+      "attempt_id": "p2-q01-attempt-1",
+      "ordinal": 1,
+      "route": "primary_quality",
+      "requested_model": "integrator-b",
+      "responding_model": "integrator-b",
+      "outcome": "completed",
+      "failure_stage": "none",
+      "failure_category": "none",
+      "quality_status": "assessed_fail",
+      "source_boundary_status": "not_applicable",
+      "safety_boundary_status": "not_applicable",
+      "fallback_from_attempt_id": null,
+      "input_tokens": 90,
+      "output_tokens": 30,
+      "wall_seconds": 1.4
+    }
+  ],
+  "final_attempt_id": "p2-q01-attempt-1",
+  "final_model": "integrator-b",
+  "completion_status": "completed_without_fallback",
+  "decision_disposition": "hold",
+  "fallback_transitions": [],
+  "quality": {
+    "assessed_attempt_ids": [
+      "p2-q01-attempt-1"
+    ],
+    "unassessed_attempts": [],
+    "final_quality_status": "fail"
+  },
+  "writes": {
+    "expected": [],
+    "observed": [],
+    "unexpected": []
+  },
+  "finalization": {
+    "status": "finalized",
+    "integrity_verified": true
+  },
+  "enforcement_status": "pass",
+  "completion_claim": "auditable_hold",
+  "automatic_route_change": false,
+  "promotion_decision": "not_promoted"
+}

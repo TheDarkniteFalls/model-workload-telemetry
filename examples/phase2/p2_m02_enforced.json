@@ -1,0 +1,90 @@
+{
+  "schema_version": "route_receipt_v1",
+  "receipt_id": "p2-m02-enforced",
+  "case_id": "P2-M02",
+  "receipt_mode": "enforced",
+  "execution_mode": "synthetic_replay",
+  "model_called": false,
+  "network_called": false,
+  "state_mutating": false,
+  "policy_id": "synthetic-route-receipt-phase2-v1",
+  "candidate_route": "fast_small",
+  "actual_route": "none",
+  "attempts": [
+    {
+      "attempt_id": "p2-m02-attempt-1",
+      "ordinal": 1,
+      "route": "fast_small",
+      "requested_model": "compact-a",
+      "responding_model": null,
+      "outcome": "infrastructure_failure",
+      "failure_stage": "request_open",
+      "failure_category": "infrastructure",
+      "quality_status": "not_assessed_runtime_failure",
+      "source_boundary_status": "not_assessed",
+      "safety_boundary_status": "not_assessed",
+      "fallback_from_attempt_id": null,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "wall_seconds": 0.25
+    },
+    {
+      "attempt_id": "p2-m02-attempt-2",
+      "ordinal": 2,
+      "route": "primary_quality",
+      "requested_model": "integrator-b",
+      "responding_model": "integrator-b",
+      "outcome": "completed",
+      "failure_stage": "none",
+      "failure_category": "none",
+      "quality_status": "assessed_pass",
+      "source_boundary_status": "not_applicable",
+      "safety_boundary_status": "not_applicable",
+      "fallback_from_attempt_id": "p2-m02-attempt-1",
+      "input_tokens": 120,
+      "output_tokens": 40,
+      "wall_seconds": 1.75
+    }
+  ],
+  "final_attempt_id": "p2-m02-attempt-2",
+  "final_model": "integrator-b",
+  "completion_status": "completed_via_fallback",
+  "decision_disposition": "deliver",
+  "fallback_transitions": [
+    {
+      "ordinal": 1,
+      "from_attempt_id": "p2-m02-attempt-1",
+      "to_attempt_id": "p2-m02-attempt-2",
+      "from_route": "fast_small",
+      "to_route": "primary_quality",
+      "trigger_outcome": "infrastructure_failure",
+      "trigger_failure_category": "infrastructure",
+      "permitted": true
+    }
+  ],
+  "quality": {
+    "assessed_attempt_ids": [
+      "p2-m02-attempt-2"
+    ],
+    "unassessed_attempts": [
+      {
+        "attempt_id": "p2-m02-attempt-1",
+        "reason": "infrastructure"
+      }
+    ],
+    "final_quality_status": "pass"
+  },
+  "writes": {
+    "expected": [],
+    "observed": [],
+    "unexpected": []
+  },
+  "finalization": {
+    "status": "finalized",
+    "integrity_verified": true
+  },
+  "enforcement_status": "pass",
+  "completion_claim": "auditable_complete",
+  "automatic_route_change": false,
+  "promotion_decision": "not_promoted"
+}

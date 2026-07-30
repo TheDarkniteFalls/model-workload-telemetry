@@ -73,6 +73,8 @@ python3 -B model_workload_telemetry.py report examples/runs.jsonl --json
 python3 -B model_workload_telemetry.py shadow-route examples/runs.jsonl examples/shadow_route_policy.json --json
 python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_passive.json examples/route_receipt_attempt_ground_truth.json
 python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_enforced.json examples/route_receipt_attempt_ground_truth.json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_d01_enforced.json examples/phase2/p2_d01_ground_truth.json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_i03_enforced.json examples/phase2/p2_i03_ground_truth.json
 python3 -B model_workload_telemetry.py --self-test
 python3 -B -m unittest discover -s tests -v
 ```
@@ -190,14 +192,30 @@ They preserve exact version identity and formalize deliver-versus-hold,
 per-attempt boundary evidence, and ordered fallback attribution without
 changing the frozen v0 contract.
 
-Current maturity is intentionally narrow: the v0 validation path and fixtures
-are runnable, and the v1 contracts are published. Expanded Phase 2 fixtures,
-mutation coverage, comparative reliability evidence, and live routing are not
-implemented. The docs-only
+The smallest Phase 2 positive conformance slice is now runnable. Exact version
+dispatch keeps v0 inputs on the unchanged v0 validator and reconciles v1
+receipts only against v1 attempt ground truth. The synthetic matrix contains:
+
+| Case | Positive path | Enforced claim | Passive companion |
+| --- | --- | --- | --- |
+| `P2-D01` | direct deterministic delivery | `auditable_complete` | yes |
+| `P2-M02` | permitted runtime fallback delivery | `auditable_complete` | no |
+| `P2-I03` | runtime fallback exhaustion hold | `auditable_hold` | yes |
+| `P2-Q01` | completed response with assessed-fail quality | `auditable_hold` | no |
+| `P2-R01` | source-boundary validation hold | `auditable_hold` | no |
+| `P2-S01` | safety-policy hold before a response | `auditable_hold` | no |
+
+The passive companions use the same attempt evidence while remaining limited
+to `observed_only`; changing receipt mode does not upgrade authority. Every
+case keeps model, network, mutation, actual-route, automatic-route-change, and
+promotion indicators disabled.
+
+This slice does not include negative mutation coverage, aggregate reporting,
+workload expansion, comparative reliability evidence, or live routing. The
+docs-only
 [Phase 2 proposal](docs/route_receipt_phase2_proposal.md) describes that
-possible synthetic expansion; it does not authorize or implement it. Nothing
-in the current repository represents production traffic or establishes
-production readiness.
+larger possible expansion. Nothing in the current repository represents
+production traffic or establishes production readiness.
 
 ## What A Report Does Not Prove
 
