@@ -210,8 +210,10 @@ to `observed_only`; changing receipt mode does not upgrade authority. Every
 case keeps model, network, mutation, actual-route, automatic-route-change, and
 promotion indicators disabled.
 
-This slice does not include negative mutation coverage, aggregate reporting,
-workload expansion, comparative reliability evidence, or live routing. The
+Current negative mutation coverage is limited to four deterministic in-memory
+P2-M02 attempt and fallback attribution mutations; it does not include negative
+fixture files, aggregate reporting, workload expansion, comparative reliability
+evidence, or live routing. The
 docs-only
 [Phase 2 proposal](docs/route_receipt_phase2_proposal.md) describes that
 larger possible expansion. Nothing in the current repository represents
