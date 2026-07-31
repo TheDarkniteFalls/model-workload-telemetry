@@ -1,0 +1,659 @@
+{
+  "actual_route": "none",
+  "automatic_route_change": false,
+  "comparison_rule": "Only shared task IDs contribute to model-route decisions.",
+  "external_requirements": [
+    {
+      "name": "live_model_quality",
+      "status": "not_assessed"
+    },
+    {
+      "name": "semantic_truth",
+      "status": "not_assessed"
+    },
+    {
+      "name": "action_authority",
+      "status": "not_assessed"
+    },
+    {
+      "name": "protected_path_proof",
+      "status": "not_assessed"
+    },
+    {
+      "name": "statistical_significance",
+      "status": "not_assessed"
+    },
+    {
+      "name": "real_monetary_cost",
+      "status": "not_assessed"
+    }
+  ],
+  "input_record_count": 12,
+  "model_called": false,
+  "network_called": false,
+  "policy_id": "synthetic_example_v0",
+  "promotion_decision": "not_promoted",
+  "report_mode": "shadow_only",
+  "schema_version": "evidence_gated_shadow_route_report_v0",
+  "state_mutating": false,
+  "status": "pass",
+  "task_classes": [
+    {
+      "candidate_model": "integrator-b",
+      "candidate_route": "primary_quality",
+      "decision_status": "candidate_meets_declared_shadow_gates",
+      "evidence": {
+        "deterministic": null,
+        "fast_small": {
+          "attempts": 2,
+          "avg_cached_tokens_per_attempt": 900.0,
+          "avg_human_score_completed": 3.0,
+          "avg_revisions_completed": 2.0,
+          "avg_turns_per_attempt": 6.0,
+          "avg_uncached_tokens_per_attempt": 3325.0,
+          "avg_wall_seconds_per_attempt": 57.5,
+          "completed": 1,
+          "completion_rate": 0.5,
+          "failure_buckets": {
+            "schema": 1
+          },
+          "model": "compact-a"
+        },
+        "primary_quality": {
+          "attempts": 2,
+          "avg_cached_tokens_per_attempt": 1250.0,
+          "avg_human_score_completed": 5.0,
+          "avg_revisions_completed": 0.5,
+          "avg_turns_per_attempt": 6.0,
+          "avg_uncached_tokens_per_attempt": 3740.0,
+          "avg_wall_seconds_per_attempt": 56.5,
+          "completed": 2,
+          "completion_rate": 1.0,
+          "failure_buckets": {},
+          "model": "integrator-b"
+        },
+        "shared_task_count": 2
+      },
+      "gates": [
+        {
+          "name": "comparison.zero_infrastructure_failures",
+          "observed": 0,
+          "reason": "Infrastructure failures make route quality not assessed rather than failed.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_shared_tasks",
+          "observed": 2,
+          "reason": "Shared-task coverage must meet the declared minimum.",
+          "required": 2,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_completion_rate",
+          "observed": 0.5,
+          "reason": "Completion rate is calculated only from paired task instances.",
+          "required": 1.0,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.zero_answer_quality_failures",
+          "observed": 0,
+          "reason": "The answer_quality failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_human_revision_failures",
+          "observed": 0,
+          "reason": "The human_revision failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_schema_failures",
+          "observed": 1,
+          "reason": "The schema failure bucket must remain empty.",
+          "required": 0,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.zero_source_boundary_failures",
+          "observed": 0,
+          "reason": "The source_boundary failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_human_score",
+          "observed": 3.0,
+          "reason": "Completed paired runs must meet the declared average human score.",
+          "required": 4.0,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.maximum_average_revisions",
+          "observed": 2.0,
+          "reason": "Completed paired runs must stay within the declared revision burden.",
+          "required": 1.0,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.maximum_average_wall_seconds",
+          "observed": 57.5,
+          "reason": "Paired attempts must stay within the declared average latency ceiling.",
+          "required": 60.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_shared_tasks",
+          "observed": 2,
+          "reason": "Shared-task coverage must meet the declared minimum.",
+          "required": 2,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_completion_rate",
+          "observed": 1.0,
+          "reason": "Completion rate is calculated only from paired task instances.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_answer_quality_failures",
+          "observed": 0,
+          "reason": "The answer_quality failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_human_revision_failures",
+          "observed": 0,
+          "reason": "The human_revision failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_schema_failures",
+          "observed": 0,
+          "reason": "The schema failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_source_boundary_failures",
+          "observed": 0,
+          "reason": "The source_boundary failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_human_score",
+          "observed": 5.0,
+          "reason": "Completed paired runs must meet the declared average human score.",
+          "required": 4.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.maximum_average_revisions",
+          "observed": 0.5,
+          "reason": "Completed paired runs must stay within the declared revision burden.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.maximum_average_wall_seconds",
+          "observed": 56.5,
+          "reason": "Paired attempts must stay within the declared average latency ceiling.",
+          "required": 60.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.maximum_quality_gap",
+          "observed": 2.0,
+          "reason": "The fast route must stay within the declared human-score gap to the primary route.",
+          "required": 0.5,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.minimum_latency_advantage",
+          "observed": -0.017699115044247787,
+          "reason": "The fast route must provide the declared average latency advantage.",
+          "required": 0.1,
+          "status": "fail"
+        }
+      ],
+      "promotion_decision": "not_promoted",
+      "rejection_reasons": [
+        "FAST_SMALL_MAXIMUM_AVERAGE_REVISIONS",
+        "FAST_SMALL_MAXIMUM_QUALITY_GAP",
+        "FAST_SMALL_MINIMUM_COMPLETION_RATE",
+        "FAST_SMALL_MINIMUM_HUMAN_SCORE",
+        "FAST_SMALL_MINIMUM_LATENCY_ADVANTAGE",
+        "FAST_SMALL_ZERO_SCHEMA_FAILURES"
+      ],
+      "shadow_gate_status": "pass",
+      "task_class": "integration"
+    },
+    {
+      "candidate_model": null,
+      "candidate_route": "deterministic",
+      "decision_status": "candidate_meets_declared_shadow_gates",
+      "evidence": {
+        "deterministic": {
+          "case_count": 4,
+          "failure_count": 0,
+          "pass_count": 4,
+          "route_id": "exact_lookup_v0"
+        },
+        "fast_small": null,
+        "primary_quality": null,
+        "shared_task_count": 0
+      },
+      "gates": [
+        {
+          "name": "deterministic.minimum_case_count",
+          "observed": 4,
+          "reason": "Deterministic evidence must meet the declared case minimum.",
+          "required": 4,
+          "status": "pass"
+        },
+        {
+          "name": "deterministic.zero_failures",
+          "observed": 0,
+          "reason": "Every declared deterministic fixture must pass.",
+          "required": 0,
+          "status": "pass"
+        }
+      ],
+      "promotion_decision": "not_promoted",
+      "rejection_reasons": [],
+      "shadow_gate_status": "pass",
+      "task_class": "lookup"
+    },
+    {
+      "candidate_model": "compact-a",
+      "candidate_route": "fast_small",
+      "decision_status": "candidate_meets_declared_shadow_gates",
+      "evidence": {
+        "deterministic": null,
+        "fast_small": {
+          "attempts": 2,
+          "avg_cached_tokens_per_attempt": 110.0,
+          "avg_human_score_completed": 4.5,
+          "avg_revisions_completed": 0.0,
+          "avg_turns_per_attempt": 2.0,
+          "avg_uncached_tokens_per_attempt": 940.0,
+          "avg_wall_seconds_per_attempt": 8.5,
+          "completed": 2,
+          "completion_rate": 1.0,
+          "failure_buckets": {},
+          "model": "compact-a"
+        },
+        "primary_quality": {
+          "attempts": 2,
+          "avg_cached_tokens_per_attempt": 410.0,
+          "avg_human_score_completed": 4.5,
+          "avg_revisions_completed": 0.5,
+          "avg_turns_per_attempt": 3.0,
+          "avg_uncached_tokens_per_attempt": 1435.0,
+          "avg_wall_seconds_per_attempt": 14.5,
+          "completed": 2,
+          "completion_rate": 1.0,
+          "failure_buckets": {},
+          "model": "integrator-b"
+        },
+        "shared_task_count": 2
+      },
+      "gates": [
+        {
+          "name": "comparison.zero_infrastructure_failures",
+          "observed": 0,
+          "reason": "Infrastructure failures make route quality not assessed rather than failed.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_shared_tasks",
+          "observed": 2,
+          "reason": "Shared-task coverage must meet the declared minimum.",
+          "required": 2,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_completion_rate",
+          "observed": 1.0,
+          "reason": "Completion rate is calculated only from paired task instances.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_answer_quality_failures",
+          "observed": 0,
+          "reason": "The answer_quality failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_human_revision_failures",
+          "observed": 0,
+          "reason": "The human_revision failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_schema_failures",
+          "observed": 0,
+          "reason": "The schema failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_source_boundary_failures",
+          "observed": 0,
+          "reason": "The source_boundary failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_human_score",
+          "observed": 4.5,
+          "reason": "Completed paired runs must meet the declared average human score.",
+          "required": 4.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.maximum_average_revisions",
+          "observed": 0.0,
+          "reason": "Completed paired runs must stay within the declared revision burden.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.maximum_average_wall_seconds",
+          "observed": 8.5,
+          "reason": "Paired attempts must stay within the declared average latency ceiling.",
+          "required": 60.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_shared_tasks",
+          "observed": 2,
+          "reason": "Shared-task coverage must meet the declared minimum.",
+          "required": 2,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_completion_rate",
+          "observed": 1.0,
+          "reason": "Completion rate is calculated only from paired task instances.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_answer_quality_failures",
+          "observed": 0,
+          "reason": "The answer_quality failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_human_revision_failures",
+          "observed": 0,
+          "reason": "The human_revision failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_schema_failures",
+          "observed": 0,
+          "reason": "The schema failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_source_boundary_failures",
+          "observed": 0,
+          "reason": "The source_boundary failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_human_score",
+          "observed": 4.5,
+          "reason": "Completed paired runs must meet the declared average human score.",
+          "required": 4.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.maximum_average_revisions",
+          "observed": 0.5,
+          "reason": "Completed paired runs must stay within the declared revision burden.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.maximum_average_wall_seconds",
+          "observed": 14.5,
+          "reason": "Paired attempts must stay within the declared average latency ceiling.",
+          "required": 60.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.maximum_quality_gap",
+          "observed": 0.0,
+          "reason": "The fast route must stay within the declared human-score gap to the primary route.",
+          "required": 0.5,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_latency_advantage",
+          "observed": 0.41379310344827586,
+          "reason": "The fast route must provide the declared average latency advantage.",
+          "required": 0.1,
+          "status": "pass"
+        }
+      ],
+      "promotion_decision": "not_promoted",
+      "rejection_reasons": [],
+      "shadow_gate_status": "pass",
+      "task_class": "maintenance"
+    },
+    {
+      "candidate_model": null,
+      "candidate_route": "hold",
+      "decision_status": "hold_gate_failure",
+      "evidence": {
+        "deterministic": null,
+        "fast_small": {
+          "attempts": 2,
+          "avg_cached_tokens_per_attempt": 475.0,
+          "avg_human_score_completed": 4.0,
+          "avg_revisions_completed": 1.0,
+          "avg_turns_per_attempt": 4.0,
+          "avg_uncached_tokens_per_attempt": 2000.0,
+          "avg_wall_seconds_per_attempt": 29.0,
+          "completed": 1,
+          "completion_rate": 0.5,
+          "failure_buckets": {
+            "source_boundary": 1
+          },
+          "model": "compact-a"
+        },
+        "primary_quality": {
+          "attempts": 2,
+          "avg_cached_tokens_per_attempt": 710.0,
+          "avg_human_score_completed": 4.5,
+          "avg_revisions_completed": 0.5,
+          "avg_turns_per_attempt": 5.0,
+          "avg_uncached_tokens_per_attempt": 2705.0,
+          "avg_wall_seconds_per_attempt": 39.0,
+          "completed": 2,
+          "completion_rate": 1.0,
+          "failure_buckets": {},
+          "model": "integrator-b"
+        },
+        "shared_task_count": 2
+      },
+      "gates": [
+        {
+          "name": "comparison.zero_infrastructure_failures",
+          "observed": 0,
+          "reason": "Infrastructure failures make route quality not assessed rather than failed.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_shared_tasks",
+          "observed": 2,
+          "reason": "Shared-task coverage must meet the declared minimum.",
+          "required": 3,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.minimum_completion_rate",
+          "observed": 0.5,
+          "reason": "Completion rate is calculated only from paired task instances.",
+          "required": 1.0,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.zero_answer_quality_failures",
+          "observed": 0,
+          "reason": "The answer_quality failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_human_revision_failures",
+          "observed": 0,
+          "reason": "The human_revision failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_schema_failures",
+          "observed": 0,
+          "reason": "The schema failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.zero_source_boundary_failures",
+          "observed": 1,
+          "reason": "The source_boundary failure bucket must remain empty.",
+          "required": 0,
+          "status": "fail"
+        },
+        {
+          "name": "fast_small.minimum_human_score",
+          "observed": 4.0,
+          "reason": "Completed paired runs must meet the declared average human score.",
+          "required": 4.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.maximum_average_revisions",
+          "observed": 1.0,
+          "reason": "Completed paired runs must stay within the declared revision burden.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.maximum_average_wall_seconds",
+          "observed": 29.0,
+          "reason": "Paired attempts must stay within the declared average latency ceiling.",
+          "required": 60.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_shared_tasks",
+          "observed": 2,
+          "reason": "Shared-task coverage must meet the declared minimum.",
+          "required": 3,
+          "status": "fail"
+        },
+        {
+          "name": "primary_quality.minimum_completion_rate",
+          "observed": 1.0,
+          "reason": "Completion rate is calculated only from paired task instances.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_answer_quality_failures",
+          "observed": 0,
+          "reason": "The answer_quality failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_human_revision_failures",
+          "observed": 0,
+          "reason": "The human_revision failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_schema_failures",
+          "observed": 0,
+          "reason": "The schema failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.zero_source_boundary_failures",
+          "observed": 0,
+          "reason": "The source_boundary failure bucket must remain empty.",
+          "required": 0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.minimum_human_score",
+          "observed": 4.5,
+          "reason": "Completed paired runs must meet the declared average human score.",
+          "required": 4.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.maximum_average_revisions",
+          "observed": 0.5,
+          "reason": "Completed paired runs must stay within the declared revision burden.",
+          "required": 1.0,
+          "status": "pass"
+        },
+        {
+          "name": "primary_quality.maximum_average_wall_seconds",
+          "observed": 39.0,
+          "reason": "Paired attempts must stay within the declared average latency ceiling.",
+          "required": 60.0,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.maximum_quality_gap",
+          "observed": 0.5,
+          "reason": "The fast route must stay within the declared human-score gap to the primary route.",
+          "required": 0.5,
+          "status": "pass"
+        },
+        {
+          "name": "fast_small.minimum_latency_advantage",
+          "observed": 0.2564102564102564,
+          "reason": "The fast route must provide the declared average latency advantage.",
+          "required": 0.1,
+          "status": "pass"
+        }
+      ],
+      "promotion_decision": "not_promoted",
+      "rejection_reasons": [
+        "FAST_SMALL_MINIMUM_COMPLETION_RATE",
+        "FAST_SMALL_MINIMUM_SHARED_TASKS",
+        "FAST_SMALL_ZERO_SOURCE_BOUNDARY_FAILURES",
+        "PRIMARY_QUALITY_MINIMUM_SHARED_TASKS"
+      ],
+      "shadow_gate_status": "fail",
+      "task_class": "research"
+    }
+  ],
+  "warning": "A shadow candidate is not an executed route or a promotion decision."
+}

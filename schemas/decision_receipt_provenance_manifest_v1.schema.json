@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TheDarkniteFalls/model-workload-telemetry/schemas/decision_receipt_provenance_manifest_v1.schema.json",
+  "title": "Decision-to-receipt provenance manifest v1",
+  "description": "A strict, digest-bound manifest for one deterministic shadow-decision to route-receipt provenance chain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "artifacts",
+    "decision",
+    "mutations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "decision_receipt_provenance_manifest_v1"
+    },
+    "manifest_id": {
+      "$ref": "#/$defs/nonempty_string"
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload",
+        "policy",
+        "shadow_report",
+        "ground_truth",
+        "receipt"
+      ],
+      "properties": {
+        "workload": {
+          "$ref": "#/$defs/artifact"
+        },
+        "policy": {
+          "$ref": "#/$defs/artifact"
+        },
+        "shadow_report": {
+          "$ref": "#/$defs/artifact"
+        },
+        "ground_truth": {
+          "$ref": "#/$defs/artifact"
+        },
+        "receipt": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_class",
+        "case_id",
+        "receipt_id"
+      ],
+      "properties": {
+        "task_class": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "case_id": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/nonempty_string"
+        }
+      }
+    },
+    "mutations": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/mutation"
+      }
+    }
+  },
+  "$defs": {
+    "nonempty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mutation_id",
+        "primary_finding_code"
+      ],
+      "properties": {
+        "mutation_id": {
+          "enum": [
+            "workload_digest_mismatch",
+            "policy_digest_mismatch",
+            "shadow_report_digest_mismatch",
+            "ground_truth_digest_mismatch",
+            "receipt_digest_mismatch",
+            "shadow_report_replay_mismatch",
+            "policy_link_mismatch",
+            "task_class_link_mismatch",
+            "route_link_mismatch",
+            "model_link_mismatch",
+            "case_link_mismatch",
+            "receipt_link_mismatch",
+            "authority_overclaim",
+            "unsafe_path",
+            "unknown_manifest_field",
+            "duplicate_manifest_key"
+          ]
+        },
+        "primary_finding_code": {
+          "$ref": "#/$defs/nonempty_string"
+        }
+      }
+    }
+  }
+}

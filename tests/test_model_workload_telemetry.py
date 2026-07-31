@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import shutil
 import tempfile
@@ -20,6 +21,16 @@ class ModelWorkloadTelemetryTests(unittest.TestCase):
     def _phase2_manifest(self) -> tuple[dict[str, Any], Path]:
         path = PHASE2 / "route_receipt_case_manifest_v1.json"
         manifest, findings = model_workload_telemetry.load_route_receipt_case_manifest(path)
+        self.assertEqual(findings, [])
+        self.assertIsNotNone(manifest)
+        assert manifest is not None
+        return manifest, path
+
+    def _phase3_manifest(self) -> tuple[dict[str, Any], Path]:
+        path = EXAMPLES / "phase3_decision_receipt_provenance_manifest_v1.json"
+        manifest, findings = (
+            model_workload_telemetry.load_decision_receipt_provenance_manifest(path)
+        )
         self.assertEqual(findings, [])
         self.assertIsNotNone(manifest)
         assert manifest is not None
@@ -787,6 +798,257 @@ class ModelWorkloadTelemetryTests(unittest.TestCase):
             self.assertEqual(report["accepted_receipts"]["total"], 12)
             self.assertEqual(report["negative_mutations"]["total"], 24)
             self.assertTrue(report["conformant"])
+
+    def test_phase3_manifest_schema_is_strict_and_catalog_is_closed(self) -> None:
+        manifest, _ = self._phase3_manifest()
+        schema = json.loads(
+            (
+                ROOT
+                / "schemas"
+                / "decision_receipt_provenance_manifest_v1.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(
+            schema["properties"]["schema_version"]["const"],
+            "decision_receipt_provenance_manifest_v1",
+        )
+        self.assertFalse(schema["properties"]["artifacts"]["additionalProperties"])
+        self.assertFalse(schema["properties"]["decision"]["additionalProperties"])
+        self.assertFalse(schema["$defs"]["artifact"]["additionalProperties"])
+        self.assertFalse(schema["$defs"]["mutation"]["additionalProperties"])
+        self.assertEqual(set(manifest), set(schema["required"]))
+        self.assertEqual(
+            tuple(manifest["artifacts"]),
+            model_workload_telemetry.DECISION_RECEIPT_PROVENANCE_ARTIFACTS,
+        )
+        self.assertEqual(
+            tuple(
+                (item["mutation_id"], item["primary_finding_code"])
+                for item in manifest["mutations"]
+            ),
+            model_workload_telemetry.DECISION_RECEIPT_PROVENANCE_MUTATIONS,
+        )
+        self.assertEqual(len(manifest["mutations"]), 16)
+        for spec in manifest["artifacts"].values():
+            path = Path(spec["path"])
+            self.assertFalse(path.is_absolute())
+            self.assertNotIn("..", path.parts)
+            artifact_path = EXAMPLES / path
+            self.assertEqual(
+                spec["sha256"],
+                hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+            )
+
+    def test_phase3_exact_replay_and_every_positive_link(self) -> None:
+        manifest, _ = self._phase3_manifest()
+        records, record_findings = model_workload_telemetry.check_path(
+            EXAMPLES / manifest["artifacts"]["workload"]["path"]
+        )
+        policy, policy_findings = model_workload_telemetry.load_shadow_policy(
+            EXAMPLES / manifest["artifacts"]["policy"]["path"]
+        )
+        self.assertEqual(record_findings, [])
+        self.assertEqual(policy_findings, [])
+        assert policy is not None
+        recomputed = model_workload_telemetry.build_shadow_route_report(records, policy)
+        self.assertEqual(
+            model_workload_telemetry._deterministic_json_bytes(recomputed),
+            (EXAMPLES / manifest["artifacts"]["shadow_report"]["path"]).read_bytes(),
+        )
+        selected = next(
+            item
+            for item in recomputed["task_classes"]
+            if item["task_class"] == manifest["decision"]["task_class"]
+        )
+        self.assertEqual(
+            (
+                selected["task_class"],
+                selected["candidate_route"],
+                selected["candidate_model"],
+            ),
+            ("maintenance", "fast_small", "compact-a"),
+        )
+
+        ground_truth, truth_findings = model_workload_telemetry.load_attempt_ground_truth(
+            EXAMPLES / manifest["artifacts"]["ground_truth"]["path"]
+        )
+        receipt, receipt_findings = model_workload_telemetry.load_route_receipt(
+            EXAMPLES / manifest["artifacts"]["receipt"]["path"]
+        )
+        self.assertEqual(truth_findings, [])
+        self.assertEqual(receipt_findings, [])
+        assert ground_truth is not None and receipt is not None
+        self.assertEqual(
+            model_workload_telemetry.validate_route_receipt(receipt, ground_truth),
+            [],
+        )
+        self.assertEqual(
+            (
+                policy["policy_id"],
+                recomputed["policy_id"],
+                ground_truth["policy_id"],
+                receipt["policy_id"],
+            ),
+            ("synthetic_example_v0",) * 4,
+        )
+        self.assertEqual(
+            (ground_truth["candidate_route"], receipt["candidate_route"]),
+            (selected["candidate_route"],) * 2,
+        )
+        self.assertEqual(
+            (
+                ground_truth["attempts"][0]["requested_model"],
+                receipt["attempts"][0]["requested_model"],
+                ground_truth["final_model"],
+                receipt["final_model"],
+            ),
+            (selected["candidate_model"],) * 4,
+        )
+        self.assertEqual(
+            (ground_truth["case_id"], receipt["case_id"]),
+            (manifest["decision"]["case_id"],) * 2,
+        )
+        self.assertEqual(receipt["receipt_id"], manifest["decision"]["receipt_id"])
+
+    def test_phase3_closed_mutations_detect_primary_without_mutating_bases(self) -> None:
+        manifest, manifest_path = self._phase3_manifest()
+        artifacts, findings = (
+            model_workload_telemetry._load_decision_receipt_provenance_artifacts(
+                manifest,
+                manifest_path,
+            )
+        )
+        self.assertEqual(findings, [])
+        original_manifest = copy.deepcopy(manifest)
+        original_artifacts = dict(artifacts)
+        manifest_text = manifest_path.read_text(encoding="utf-8")
+        seen: set[str] = set()
+        for mutation in manifest["mutations"]:
+            mutation_id = mutation["mutation_id"]
+            with self.subTest(mutation=mutation_id):
+                mutation_findings = (
+                    model_workload_telemetry._run_decision_receipt_provenance_mutation(
+                        mutation_id,
+                        manifest,
+                        artifacts,
+                        manifest_text,
+                    )
+                )
+                self.assertIn(
+                    mutation["primary_finding_code"],
+                    {finding.code for finding in mutation_findings},
+                )
+                self.assertEqual(manifest, original_manifest)
+                self.assertEqual(artifacts, original_artifacts)
+                seen.add(mutation_id)
+        self.assertEqual(
+            seen,
+            {
+                mutation_id
+                for mutation_id, _ in (
+                    model_workload_telemetry.DECISION_RECEIPT_PROVENANCE_MUTATIONS
+                )
+            },
+        )
+
+    def test_phase3_duplicate_manifest_key_fails_before_reporting(self) -> None:
+        _, source_path = self._phase3_manifest()
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / source_path.name
+            raw = source_path.read_text(encoding="utf-8").replace(
+                "{",
+                '{"schema_version":"decision_receipt_provenance_manifest_v1",',
+                1,
+            )
+            copied.write_text(raw, encoding="utf-8")
+            report, findings = (
+                model_workload_telemetry.build_decision_receipt_provenance_report(
+                    copied
+                )
+            )
+            self.assertIsNone(report)
+            self.assertIn(
+                "PROVENANCE_MANIFEST_JSON",
+                {finding.code for finding in findings},
+            )
+
+    def test_phase3_denominators_ignore_undeclared_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "examples"
+            shutil.copytree(EXAMPLES, copied)
+            (copied / "phase3" / "undeclared.json").write_text(
+                '{"ignored": true}\n',
+                encoding="utf-8",
+            )
+            report, findings = (
+                model_workload_telemetry.build_decision_receipt_provenance_report(
+                    copied / "phase3_decision_receipt_provenance_manifest_v1.json"
+                )
+            )
+            self.assertEqual(findings, [])
+            assert report is not None
+            self.assertEqual(report["artifact_integrity"], {"passed": 5, "total": 5})
+            self.assertEqual(
+                report["shadow_report_replay"],
+                {"passed": 1, "total": 1},
+            )
+            self.assertEqual(report["decision_receipt_chain"]["total"], 1)
+            self.assertEqual(report["negative_mutations"]["total"], 16)
+            self.assertTrue(report["conformant"])
+
+    def test_phase3_reports_are_byte_deterministic_and_claim_bounded(self) -> None:
+        _, manifest_path = self._phase3_manifest()
+        first, first_findings = (
+            model_workload_telemetry.build_decision_receipt_provenance_report(
+                manifest_path
+            )
+        )
+        second, second_findings = (
+            model_workload_telemetry.build_decision_receipt_provenance_report(
+                manifest_path
+            )
+        )
+        self.assertEqual(first_findings, [])
+        self.assertEqual(second_findings, [])
+        assert first is not None and second is not None
+        first_bytes = model_workload_telemetry._deterministic_json_bytes(first)
+        second_bytes = model_workload_telemetry._deterministic_json_bytes(second)
+        self.assertEqual(first_bytes, second_bytes)
+        rendered = model_workload_telemetry.render_decision_receipt_provenance_report(
+            first
+        )
+        self.assertEqual(
+            rendered,
+            model_workload_telemetry.render_decision_receipt_provenance_report(second),
+        )
+        self.assertTrue(first["conformant"])
+        self.assertEqual(first["artifact_integrity"], {"passed": 5, "total": 5})
+        self.assertEqual(first["shadow_report_replay"], {"passed": 1, "total": 1})
+        self.assertEqual(first["decision_receipt_chain"]["passed"], 1)
+        self.assertEqual(first["decision_receipt_chain"]["total"], 1)
+        self.assertEqual(first["decision_receipt_chain"]["false_rejects"], 0)
+        self.assertEqual(first["negative_mutations"]["detected"], 16)
+        self.assertEqual(first["negative_mutations"]["total"], 16)
+        for field in ("false_accepts", "primary_misses", "validator_crashes"):
+            self.assertEqual(first["negative_mutations"][field], 0)
+        self.assertIn("artifacts=5/5 replay=1/1 chain=1/1 mutations=16/16", rendered)
+        self.assertIn(
+            "false_accepts=0 false_rejects=0 primary_misses=0 validator_crashes=0",
+            rendered,
+        )
+        self.assertIn("conformant=true", rendered)
+        combined = rendered + first_bytes.decode("utf-8")
+        for forbidden in (
+            "%",
+            str(ROOT),
+            "timestamp",
+            "discovered",
+            "comparative",
+            "runtime_authority",
+        ):
+            self.assertNotIn(forbidden, combined)
 
     def test_route_receipt_rejects_missing_attempt(self) -> None:
         receipt, ground_truth = self._route_receipt_fixture()

@@ -1,0 +1,97 @@
+{
+  "schema_version": "decision_receipt_provenance_manifest_v1",
+  "manifest_id": "phase3-decision-receipt-provenance-v1",
+  "artifacts": {
+    "workload": {
+      "path": "runs.jsonl",
+      "sha256": "18e852c656b25b175af28e16c32cddeba806513c2979ecee407e681c5b6b17fc"
+    },
+    "policy": {
+      "path": "shadow_route_policy.json",
+      "sha256": "b8e76473f4763a307ff17fc9739aff37f68e7ced1ba27a00e6774cb29466c48d"
+    },
+    "shadow_report": {
+      "path": "phase3/shadow_route_report_v0.json",
+      "sha256": "8e78860622058641a4d4cf1af201a9dc6b9e01ffb2c56b6c081c2ebad92ceea1"
+    },
+    "ground_truth": {
+      "path": "phase3/p3_m01_ground_truth.json",
+      "sha256": "d28ec78efc52da9d05b7c1411467e3759b19e47318df03f67c3c780a937235e6"
+    },
+    "receipt": {
+      "path": "phase3/p3_m01_enforced.json",
+      "sha256": "09b7ac6c93bb6ac1c620dd7927bdb9c756e9c7a6106e0c71689b61e4f129fe08"
+    }
+  },
+  "decision": {
+    "task_class": "maintenance",
+    "case_id": "P3-M01",
+    "receipt_id": "p3-m01-enforced"
+  },
+  "mutations": [
+    {
+      "mutation_id": "workload_digest_mismatch",
+      "primary_finding_code": "PROVENANCE_ARTIFACT_DIGEST"
+    },
+    {
+      "mutation_id": "policy_digest_mismatch",
+      "primary_finding_code": "PROVENANCE_ARTIFACT_DIGEST"
+    },
+    {
+      "mutation_id": "shadow_report_digest_mismatch",
+      "primary_finding_code": "PROVENANCE_ARTIFACT_DIGEST"
+    },
+    {
+      "mutation_id": "ground_truth_digest_mismatch",
+      "primary_finding_code": "PROVENANCE_ARTIFACT_DIGEST"
+    },
+    {
+      "mutation_id": "receipt_digest_mismatch",
+      "primary_finding_code": "PROVENANCE_ARTIFACT_DIGEST"
+    },
+    {
+      "mutation_id": "shadow_report_replay_mismatch",
+      "primary_finding_code": "PROVENANCE_SHADOW_REPORT_REPLAY"
+    },
+    {
+      "mutation_id": "policy_link_mismatch",
+      "primary_finding_code": "PROVENANCE_POLICY_LINK"
+    },
+    {
+      "mutation_id": "task_class_link_mismatch",
+      "primary_finding_code": "PROVENANCE_TASK_CLASS_LINK"
+    },
+    {
+      "mutation_id": "route_link_mismatch",
+      "primary_finding_code": "PROVENANCE_ROUTE_LINK"
+    },
+    {
+      "mutation_id": "model_link_mismatch",
+      "primary_finding_code": "PROVENANCE_MODEL_LINK"
+    },
+    {
+      "mutation_id": "case_link_mismatch",
+      "primary_finding_code": "PROVENANCE_CASE_LINK"
+    },
+    {
+      "mutation_id": "receipt_link_mismatch",
+      "primary_finding_code": "PROVENANCE_RECEIPT_LINK"
+    },
+    {
+      "mutation_id": "authority_overclaim",
+      "primary_finding_code": "PROVENANCE_AUTHORITY_OVERCLAIM"
+    },
+    {
+      "mutation_id": "unsafe_path",
+      "primary_finding_code": "PROVENANCE_ARTIFACT_PATH"
+    },
+    {
+      "mutation_id": "unknown_manifest_field",
+      "primary_finding_code": "PROVENANCE_MANIFEST_UNKNOWN_FIELD"
+    },
+    {
+      "mutation_id": "duplicate_manifest_key",
+      "primary_finding_code": "PROVENANCE_MANIFEST_JSON"
+    }
+  ]
+}

@@ -77,6 +77,8 @@ python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2
 python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_i03_enforced.json examples/phase2/p2_i03_ground_truth.json
 python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json
 python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json --json
+python3 -B model_workload_telemetry.py decision-receipt-provenance examples/phase3_decision_receipt_provenance_manifest_v1.json
+python3 -B model_workload_telemetry.py decision-receipt-provenance examples/phase3_decision_receipt_provenance_manifest_v1.json --json
 python3 -B model_workload_telemetry.py --self-test
 python3 -B -m unittest discover -s tests -v
 ```
@@ -235,6 +237,23 @@ documents the full boundary.
 These exact counts describe only the declared synthetic corpus. They are not a
 reliability estimate, do not generalize statistically, and do not establish
 production readiness, better routing, or better model quality.
+
+Phase 3 adds a separate deterministic provenance layer without changing the
+receipt validator. The strict
+[`decision_receipt_provenance_manifest_v1`](examples/phase3_decision_receipt_provenance_manifest_v1.json)
+binds the exact workload, policy, frozen shadow report, v1 ground truth, and v1
+enforced receipt bytes. It recomputes the unchanged shadow report, selects the
+`maintenance` decision, and derives `fast_small` and `compact-a` only from that
+recomputed result before checking policy, task-class, route, model, case, and
+receipt links.
+
+The declared synthetic result is `5/5` artifacts, `1/1` exact replay, `1/1`
+decision-to-receipt chain, and `16/16` closed in-memory provenance mutations,
+with no false accepts, false rejects, primary misses, or validator crashes.
+The [Phase 3 proposal and acceptance record](docs/route_receipt_phase3_proposal.md)
+defines this provenance boundary. It adds no model or network call, live route,
+persistence, fallback execution, promotion, workload expansion, production
+claim, or comparative reliability claim.
 
 ## What A Report Does Not Prove
 

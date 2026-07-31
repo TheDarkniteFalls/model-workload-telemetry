@@ -1,0 +1,40 @@
+{
+  "schema_version": "route_attempt_ground_truth_v1",
+  "case_id": "P3-M01",
+  "execution_mode": "synthetic_replay",
+  "model_called": false,
+  "network_called": false,
+  "state_mutating": false,
+  "policy_id": "synthetic_example_v0",
+  "candidate_route": "fast_small",
+  "fallback_policy": {
+    "max_attempts": 1,
+    "allowed_transitions": []
+  },
+  "attempts": [
+    {
+      "attempt_id": "p3-m01-attempt-1",
+      "ordinal": 1,
+      "route": "fast_small",
+      "requested_model": "compact-a",
+      "responding_model": "compact-a",
+      "outcome": "completed",
+      "failure_stage": "none",
+      "failure_category": "none",
+      "quality_status": "assessed_pass",
+      "source_boundary_status": "not_applicable",
+      "safety_boundary_status": "not_applicable",
+      "fallback_from_attempt_id": null,
+      "input_tokens": 90,
+      "output_tokens": 30,
+      "wall_seconds": 0.75
+    }
+  ],
+  "final_attempt_id": "p3-m01-attempt-1",
+  "final_model": "compact-a",
+  "completion_status": "completed_without_fallback",
+  "decision_disposition": "deliver",
+  "final_quality_status": "pass",
+  "expected_writes": [],
+  "observed_writes": []
+}

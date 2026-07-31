@@ -19,6 +19,7 @@ MAX_JSONL_BYTES = 5_000_000
 MAX_POLICY_BYTES = 100_000
 MAX_ROUTE_RECEIPT_BYTES = 100_000
 MAX_ROUTE_RECEIPT_CASE_MANIFEST_BYTES = 500_000
+MAX_DECISION_RECEIPT_PROVENANCE_MANIFEST_BYTES = 500_000
 SHADOW_POLICY_SCHEMA = "shadow_route_policy_v0"
 SHADOW_REPORT_SCHEMA = "evidence_gated_shadow_route_report_v0"
 ROUTE_RECEIPT_SCHEMA = "route_receipt_v0"
@@ -27,6 +28,37 @@ ROUTE_RECEIPT_SCHEMA_V1 = "route_receipt_v1"
 ATTEMPT_GROUND_TRUTH_SCHEMA_V1 = "route_attempt_ground_truth_v1"
 ROUTE_RECEIPT_CASE_MANIFEST_SCHEMA_V1 = "route_receipt_case_manifest_v1"
 ROUTE_RECEIPT_CONFORMANCE_REPORT_SCHEMA_V1 = "route_receipt_conformance_report_v1"
+DECISION_RECEIPT_PROVENANCE_MANIFEST_SCHEMA_V1 = (
+    "decision_receipt_provenance_manifest_v1"
+)
+DECISION_RECEIPT_PROVENANCE_REPORT_SCHEMA_V1 = (
+    "decision_receipt_provenance_report_v1"
+)
+DECISION_RECEIPT_PROVENANCE_ARTIFACTS = (
+    "workload",
+    "policy",
+    "shadow_report",
+    "ground_truth",
+    "receipt",
+)
+DECISION_RECEIPT_PROVENANCE_MUTATIONS = (
+    ("workload_digest_mismatch", "PROVENANCE_ARTIFACT_DIGEST"),
+    ("policy_digest_mismatch", "PROVENANCE_ARTIFACT_DIGEST"),
+    ("shadow_report_digest_mismatch", "PROVENANCE_ARTIFACT_DIGEST"),
+    ("ground_truth_digest_mismatch", "PROVENANCE_ARTIFACT_DIGEST"),
+    ("receipt_digest_mismatch", "PROVENANCE_ARTIFACT_DIGEST"),
+    ("shadow_report_replay_mismatch", "PROVENANCE_SHADOW_REPORT_REPLAY"),
+    ("policy_link_mismatch", "PROVENANCE_POLICY_LINK"),
+    ("task_class_link_mismatch", "PROVENANCE_TASK_CLASS_LINK"),
+    ("route_link_mismatch", "PROVENANCE_ROUTE_LINK"),
+    ("model_link_mismatch", "PROVENANCE_MODEL_LINK"),
+    ("case_link_mismatch", "PROVENANCE_CASE_LINK"),
+    ("receipt_link_mismatch", "PROVENANCE_RECEIPT_LINK"),
+    ("authority_overclaim", "PROVENANCE_AUTHORITY_OVERCLAIM"),
+    ("unsafe_path", "PROVENANCE_ARTIFACT_PATH"),
+    ("unknown_manifest_field", "PROVENANCE_MANIFEST_UNKNOWN_FIELD"),
+    ("duplicate_manifest_key", "PROVENANCE_MANIFEST_JSON"),
+)
 ROUTE_RECEIPT_ROUTES = {
     "deterministic",
     "fast_small",
@@ -2259,6 +2291,911 @@ def render_route_receipt_conformance_report(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _deterministic_json_bytes(value: object) -> bytes:
+    return (
+        json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    ).encode("utf-8")
+
+
+def _check_provenance_fields(
+    value: object,
+    expected: set[str],
+    context: str,
+    findings: list[Finding],
+) -> bool:
+    if not isinstance(value, dict):
+        findings.append(
+            Finding("PROVENANCE_MANIFEST_SHAPE", f"{context} must be an object")
+        )
+        return False
+    missing = sorted(expected - set(value))
+    unknown = sorted(set(value) - expected)
+    for field in missing:
+        findings.append(
+            Finding(
+                "PROVENANCE_MANIFEST_REQUIRED_FIELD",
+                f"{context} is missing required field {field}",
+            )
+        )
+    for field in unknown:
+        findings.append(
+            Finding(
+                "PROVENANCE_MANIFEST_UNKNOWN_FIELD",
+                f"{context} contains unknown field {field}",
+            )
+        )
+    return not missing and not unknown
+
+
+def _safe_provenance_relative_path(value: object) -> bool:
+    if not _is_nonempty_text(value):
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
+def validate_decision_receipt_provenance_manifest(
+    manifest: dict[str, Any],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    _check_provenance_fields(
+        manifest,
+        {"schema_version", "manifest_id", "artifacts", "decision", "mutations"},
+        "manifest",
+        findings,
+    )
+    if manifest.get("schema_version") != DECISION_RECEIPT_PROVENANCE_MANIFEST_SCHEMA_V1:
+        findings.append(
+            Finding(
+                "PROVENANCE_SCHEMA_VERSION",
+                "schema_version must be decision_receipt_provenance_manifest_v1",
+            )
+        )
+    if not _is_nonempty_text(manifest.get("manifest_id")):
+        findings.append(
+            Finding("PROVENANCE_MANIFEST_ID", "manifest_id must be non-empty text")
+        )
+
+    artifacts = manifest.get("artifacts")
+    _check_provenance_fields(
+        artifacts,
+        set(DECISION_RECEIPT_PROVENANCE_ARTIFACTS),
+        "manifest.artifacts",
+        findings,
+    )
+    seen_paths: set[str] = set()
+    if isinstance(artifacts, dict):
+        for name in DECISION_RECEIPT_PROVENANCE_ARTIFACTS:
+            spec = artifacts.get(name)
+            context = f"manifest.artifacts.{name}"
+            if not _check_provenance_fields(
+                spec,
+                {"path", "sha256"},
+                context,
+                findings,
+            ):
+                continue
+            assert isinstance(spec, dict)
+            path_value = spec.get("path")
+            if not _safe_provenance_relative_path(path_value):
+                findings.append(
+                    Finding(
+                        "PROVENANCE_ARTIFACT_PATH",
+                        f"{context}.path must stay within the manifest folder",
+                    )
+                )
+            elif path_value in seen_paths:
+                findings.append(
+                    Finding(
+                        "PROVENANCE_ARTIFACT_PATH",
+                        f"{context}.path duplicates another artifact path",
+                    )
+                )
+            else:
+                seen_paths.add(path_value)
+            if not _is_sha256_digest(spec.get("sha256")):
+                findings.append(
+                    Finding(
+                        "PROVENANCE_ARTIFACT_DIGEST",
+                        f"{context}.sha256 must be a lowercase SHA-256 digest",
+                    )
+                )
+    decision = manifest.get("decision")
+    _check_provenance_fields(
+        decision,
+        {"task_class", "case_id", "receipt_id"},
+        "manifest.decision",
+        findings,
+    )
+    if isinstance(decision, dict):
+        for field in ("task_class", "case_id", "receipt_id"):
+            if not _is_nonempty_text(decision.get(field)):
+                findings.append(
+                    Finding(
+                        "PROVENANCE_DECISION_LINK",
+                        f"manifest.decision.{field} must be non-empty text",
+                    )
+                )
+
+    mutations = manifest.get("mutations")
+    declared: list[tuple[object, object]] = []
+    if not isinstance(mutations, list):
+        findings.append(
+            Finding(
+                "PROVENANCE_MUTATION_CATALOG",
+                "manifest.mutations must be the closed 16-mutation list",
+            )
+        )
+    else:
+        for index, mutation in enumerate(mutations):
+            context = f"manifest.mutations[{index}]"
+            if _check_provenance_fields(
+                mutation,
+                {"mutation_id", "primary_finding_code"},
+                context,
+                findings,
+            ):
+                assert isinstance(mutation, dict)
+                declared.append(
+                    (
+                        mutation.get("mutation_id"),
+                        mutation.get("primary_finding_code"),
+                    )
+                )
+        if tuple(declared) != DECISION_RECEIPT_PROVENANCE_MUTATIONS:
+            findings.append(
+                Finding(
+                    "PROVENANCE_MUTATION_CATALOG",
+                    "manifest.mutations must exactly match the closed Phase 3 catalog",
+                )
+            )
+    return findings
+
+
+def load_decision_receipt_provenance_manifest(
+    path: Path,
+) -> tuple[dict[str, Any] | None, list[Finding]]:
+    if not path.is_file():
+        return None, [
+            Finding(
+                "PROVENANCE_MANIFEST_FILE_MISSING",
+                f"provenance manifest file does not exist: {path}",
+            )
+        ]
+    if path.stat().st_size > MAX_DECISION_RECEIPT_PROVENANCE_MANIFEST_BYTES:
+        return None, [
+            Finding(
+                "PROVENANCE_MANIFEST_FILE_SIZE",
+                "provenance manifest exceeds five hundred kilobytes",
+            )
+        ]
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        return None, [Finding("PROVENANCE_MANIFEST_JSON", str(exc))]
+    if not isinstance(value, dict):
+        return None, [
+            Finding(
+                "PROVENANCE_MANIFEST_SHAPE",
+                "provenance manifest must be a JSON object",
+            )
+        ]
+    return value, validate_decision_receipt_provenance_manifest(value)
+
+
+def _load_decision_receipt_provenance_artifacts(
+    manifest: dict[str, Any],
+    manifest_path: Path,
+) -> tuple[dict[str, bytes], list[Finding]]:
+    artifacts: dict[str, bytes] = {}
+    findings: list[Finding] = []
+    base = manifest_path.resolve().parent
+    for name in DECISION_RECEIPT_PROVENANCE_ARTIFACTS:
+        spec = manifest["artifacts"][name]
+        relative_path = Path(spec["path"])
+        try:
+            resolved = (base / relative_path).resolve()
+            resolved.relative_to(base)
+        except (OSError, RuntimeError, ValueError):
+            findings.append(
+                Finding(
+                    "PROVENANCE_ARTIFACT_PATH",
+                    f"artifact {name} resolves outside the manifest folder",
+                )
+            )
+            continue
+        if not resolved.is_file():
+            findings.append(
+                Finding(
+                    "PROVENANCE_ARTIFACT_MISSING",
+                    f"artifact {name} does not name a file",
+                )
+            )
+            continue
+        size_limit = MAX_JSONL_BYTES if name == "workload" else MAX_ROUTE_RECEIPT_BYTES
+        if resolved.stat().st_size > size_limit:
+            findings.append(
+                Finding(
+                    "PROVENANCE_ARTIFACT_SIZE",
+                    f"artifact {name} exceeds its size limit",
+                )
+            )
+            continue
+        raw = resolved.read_bytes()
+        artifacts[name] = raw
+        if hashlib.sha256(raw).hexdigest() != spec["sha256"]:
+            findings.append(
+                Finding(
+                    "PROVENANCE_ARTIFACT_DIGEST",
+                    f"artifact {name} digest disagrees with its exact bytes",
+                )
+            )
+    return artifacts, findings
+
+
+def _provenance_json_object(
+    raw: bytes,
+    *,
+    label: str,
+    finding_code: str,
+) -> tuple[dict[str, Any] | None, list[Finding]]:
+    try:
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        return None, [Finding(finding_code, f"{label}: {exc}")]
+    if not isinstance(value, dict):
+        return None, [Finding(finding_code, f"{label} must be a JSON object")]
+    return value, []
+
+
+def _provenance_records(raw: bytes) -> tuple[list[dict[str, Any]], list[Finding]]:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        return [], [Finding("PROVENANCE_WORKLOAD_INVALID", str(exc))]
+    records: list[dict[str, Any]] = []
+    parse_findings: list[Finding] = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        if not raw_line.strip():
+            continue
+        try:
+            value = json.loads(raw_line, object_pairs_hook=_reject_duplicate_keys)
+        except (ValueError, json.JSONDecodeError) as exc:
+            parse_findings.append(Finding("JSON_LINE", f"line {line_number}: {exc}"))
+            continue
+        if not isinstance(value, dict):
+            parse_findings.append(
+                Finding("RECORD_SHAPE", f"line {line_number}: record must be an object")
+            )
+            continue
+        value["_line"] = line_number
+        records.append(value)
+    if not records and not parse_findings:
+        parse_findings.append(Finding("EMPTY_INPUT", "input has no records"))
+    parse_findings.extend(validate_records(records))
+    if parse_findings:
+        return [], [
+            Finding(
+                "PROVENANCE_WORKLOAD_INVALID",
+                f"{finding.code} {finding.message}",
+            )
+            for finding in parse_findings
+        ]
+    return records, []
+
+
+def _phase3_non_execution(
+    shadow_report: dict[str, Any],
+    ground_truth: dict[str, Any],
+    receipt: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "model_called": any(
+            item.get("model_called") is not False
+            for item in (shadow_report, ground_truth, receipt)
+        ),
+        "network_called": any(
+            item.get("network_called") is not False
+            for item in (shadow_report, ground_truth, receipt)
+        ),
+        "state_mutating": any(
+            item.get("state_mutating") is not False
+            for item in (shadow_report, ground_truth, receipt)
+        ),
+        "actual_route": (
+            "none"
+            if shadow_report.get("actual_route") == "none"
+            and receipt.get("actual_route") == "none"
+            else "invalid"
+        ),
+        "automatic_route_change": any(
+            item.get("automatic_route_change") is not False
+            for item in (shadow_report, receipt)
+        ),
+        "promotion_decision": (
+            "not_promoted"
+            if shadow_report.get("promotion_decision") == "not_promoted"
+            and receipt.get("promotion_decision") == "not_promoted"
+            else "invalid"
+        ),
+    }
+
+
+def _evaluate_decision_receipt_provenance_bundle(
+    manifest: dict[str, Any],
+    artifacts: dict[str, bytes],
+) -> tuple[dict[str, Any], list[Finding]]:
+    findings = validate_decision_receipt_provenance_manifest(manifest)
+    artifact_passed = 0
+    if findings:
+        return {
+            "artifact_passed": artifact_passed,
+            "replay_passed": False,
+            "chain_passed": False,
+            "selected_decision": None,
+            "non_execution": None,
+        }, findings
+
+    for name in DECISION_RECEIPT_PROVENANCE_ARTIFACTS:
+        spec = manifest["artifacts"][name]
+        if not _safe_provenance_relative_path(spec["path"]):
+            findings.append(
+                Finding(
+                    "PROVENANCE_ARTIFACT_PATH",
+                    f"artifact {name} path is unsafe",
+                )
+            )
+            continue
+        raw = artifacts.get(name)
+        if raw is None:
+            findings.append(
+                Finding(
+                    "PROVENANCE_ARTIFACT_MISSING",
+                    f"artifact {name} bytes are unavailable",
+                )
+            )
+            continue
+        if hashlib.sha256(raw).hexdigest() != spec["sha256"]:
+            findings.append(
+                Finding(
+                    "PROVENANCE_ARTIFACT_DIGEST",
+                    f"artifact {name} digest disagrees with its exact bytes",
+                )
+            )
+            continue
+        artifact_passed += 1
+    if artifact_passed != len(DECISION_RECEIPT_PROVENANCE_ARTIFACTS):
+        return {
+            "artifact_passed": artifact_passed,
+            "replay_passed": False,
+            "chain_passed": False,
+            "selected_decision": None,
+            "non_execution": None,
+        }, findings
+
+    records, workload_findings = _provenance_records(artifacts["workload"])
+    policy, policy_parse_findings = _provenance_json_object(
+        artifacts["policy"],
+        label="policy",
+        finding_code="PROVENANCE_POLICY_INVALID",
+    )
+    frozen_report, report_findings = _provenance_json_object(
+        artifacts["shadow_report"],
+        label="shadow report",
+        finding_code="PROVENANCE_SHADOW_REPORT_INVALID",
+    )
+    ground_truth, truth_parse_findings = _provenance_json_object(
+        artifacts["ground_truth"],
+        label="ground truth",
+        finding_code="PROVENANCE_GROUND_TRUTH_INVALID",
+    )
+    receipt, receipt_parse_findings = _provenance_json_object(
+        artifacts["receipt"],
+        label="receipt",
+        finding_code="PROVENANCE_RECEIPT_INVALID",
+    )
+    findings.extend(workload_findings)
+    findings.extend(policy_parse_findings)
+    findings.extend(report_findings)
+    findings.extend(truth_parse_findings)
+    findings.extend(receipt_parse_findings)
+
+    if policy is not None:
+        findings.extend(
+            Finding(
+                "PROVENANCE_POLICY_INVALID",
+                f"{finding.code} {finding.message}",
+            )
+            for finding in validate_shadow_policy(policy)
+        )
+    parse_failed = bool(findings)
+    if parse_failed or policy is None or frozen_report is None:
+        return {
+            "artifact_passed": artifact_passed,
+            "replay_passed": False,
+            "chain_passed": False,
+            "selected_decision": None,
+            "non_execution": None,
+        }, findings
+
+    recomputed_report = build_shadow_route_report(records, policy)
+    replay_passed = (
+        _deterministic_json_bytes(recomputed_report) == artifacts["shadow_report"]
+    )
+    if not replay_passed:
+        findings.append(
+            Finding(
+                "PROVENANCE_SHADOW_REPORT_REPLAY",
+                "frozen shadow report bytes do not match exact deterministic replay",
+            )
+        )
+
+    chain_findings: list[Finding] = []
+    if ground_truth is None or receipt is None:
+        chain_findings.append(
+            Finding(
+                "PROVENANCE_DECISION_RECEIPT_CHAIN",
+                "ground truth and receipt must both be JSON objects",
+            )
+        )
+        selected = None
+        non_execution = None
+    else:
+        truth_findings = validate_attempt_ground_truth(ground_truth)
+        receipt_findings = validate_route_receipt(receipt, ground_truth)
+        chain_findings.extend(
+            Finding(
+                "PROVENANCE_GROUND_TRUTH_INVALID",
+                f"{finding.code} {finding.message}",
+            )
+            for finding in truth_findings
+        )
+        chain_findings.extend(
+            Finding(
+                "PROVENANCE_RECEIPT_INVALID",
+                f"{finding.code} {finding.message}",
+            )
+            for finding in receipt_findings
+        )
+
+        policy_ids = (
+            policy.get("policy_id"),
+            recomputed_report.get("policy_id"),
+            ground_truth.get("policy_id"),
+            receipt.get("policy_id"),
+        )
+        if any(policy_id != policy_ids[0] for policy_id in policy_ids[1:]):
+            chain_findings.append(
+                Finding(
+                    "PROVENANCE_POLICY_LINK",
+                    "policy identity is not preserved across decision evidence and receipt evidence",
+                )
+            )
+
+        task_class = manifest["decision"]["task_class"]
+        selected = next(
+            (
+                item
+                for item in recomputed_report["task_classes"]
+                if item.get("task_class") == task_class
+            ),
+            None,
+        )
+        if selected is None:
+            chain_findings.append(
+                Finding(
+                    "PROVENANCE_TASK_CLASS_LINK",
+                    "declared task class is absent from the recomputed shadow report",
+                )
+            )
+        else:
+            expected_route = selected.get("candidate_route")
+            if (
+                ground_truth.get("candidate_route") != expected_route
+                or receipt.get("candidate_route") != expected_route
+            ):
+                chain_findings.append(
+                    Finding(
+                        "PROVENANCE_ROUTE_LINK",
+                        "candidate route does not match the recomputed shadow decision",
+                    )
+                )
+
+            expected_model = selected.get("candidate_model")
+            truth_attempts = ground_truth.get("attempts")
+            receipt_attempts = receipt.get("attempts")
+            linked_models: list[object] = [
+                ground_truth.get("final_model"),
+                receipt.get("final_model"),
+            ]
+            if (
+                isinstance(truth_attempts, list)
+                and truth_attempts
+                and isinstance(truth_attempts[0], dict)
+            ):
+                linked_models.append(truth_attempts[0].get("requested_model"))
+                linked_models.append(truth_attempts[0].get("responding_model"))
+            if (
+                isinstance(receipt_attempts, list)
+                and receipt_attempts
+                and isinstance(receipt_attempts[0], dict)
+            ):
+                linked_models.append(receipt_attempts[0].get("requested_model"))
+                linked_models.append(receipt_attempts[0].get("responding_model"))
+            if any(model != expected_model for model in linked_models):
+                chain_findings.append(
+                    Finding(
+                        "PROVENANCE_MODEL_LINK",
+                        "candidate model does not match the recomputed shadow decision",
+                    )
+                )
+
+        case_id = manifest["decision"]["case_id"]
+        if (
+            ground_truth.get("case_id") != case_id
+            or receipt.get("case_id") != case_id
+        ):
+            chain_findings.append(
+                Finding(
+                    "PROVENANCE_CASE_LINK",
+                    "case identity is not preserved across the manifest, ground truth, and receipt",
+                )
+            )
+        if receipt.get("receipt_id") != manifest["decision"]["receipt_id"]:
+            chain_findings.append(
+                Finding(
+                    "PROVENANCE_RECEIPT_LINK",
+                    "receipt identity does not match the manifest decision link",
+                )
+            )
+
+        non_execution = _phase3_non_execution(
+            recomputed_report,
+            ground_truth,
+            receipt,
+        )
+        if non_execution != {
+            "model_called": False,
+            "network_called": False,
+            "state_mutating": False,
+            "actual_route": "none",
+            "automatic_route_change": False,
+            "promotion_decision": "not_promoted",
+        }:
+            chain_findings.append(
+                Finding(
+                    "PROVENANCE_AUTHORITY_OVERCLAIM",
+                    "the chain claims execution, mutation, route change, or promotion",
+                )
+            )
+
+    findings.extend(chain_findings)
+    return {
+        "artifact_passed": artifact_passed,
+        "replay_passed": replay_passed,
+        "chain_passed": not chain_findings,
+        "selected_decision": selected,
+        "non_execution": non_execution,
+    }, findings
+
+
+def _replace_provenance_artifact(
+    manifest: dict[str, Any],
+    artifacts: dict[str, bytes],
+    name: str,
+    value: dict[str, Any],
+) -> None:
+    raw = _deterministic_json_bytes(value)
+    artifacts[name] = raw
+    manifest["artifacts"][name]["sha256"] = hashlib.sha256(raw).hexdigest()
+
+
+def _run_decision_receipt_provenance_mutation(
+    mutation_id: str,
+    manifest: dict[str, Any],
+    artifacts: dict[str, bytes],
+    manifest_text: str,
+) -> list[Finding]:
+    mutated_manifest = copy.deepcopy(manifest)
+    mutated_artifacts = dict(artifacts)
+
+    digest_targets = {
+        "workload_digest_mismatch": "workload",
+        "policy_digest_mismatch": "policy",
+        "shadow_report_digest_mismatch": "shadow_report",
+        "ground_truth_digest_mismatch": "ground_truth",
+        "receipt_digest_mismatch": "receipt",
+    }
+    if mutation_id in digest_targets:
+        mutated_manifest["artifacts"][digest_targets[mutation_id]]["sha256"] = "0" * 64
+    elif mutation_id == "shadow_report_replay_mismatch":
+        report, report_findings = _provenance_json_object(
+            mutated_artifacts["shadow_report"],
+            label="shadow report",
+            finding_code="PROVENANCE_SHADOW_REPORT_INVALID",
+        )
+        if report_findings or report is None:
+            return report_findings
+        report["warning"] = "mutated replay warning"
+        _replace_provenance_artifact(
+            mutated_manifest,
+            mutated_artifacts,
+            "shadow_report",
+            report,
+        )
+    elif mutation_id == "policy_link_mismatch":
+        policy, _ = _provenance_json_object(
+            mutated_artifacts["policy"],
+            label="policy",
+            finding_code="PROVENANCE_POLICY_INVALID",
+        )
+        report, _ = _provenance_json_object(
+            mutated_artifacts["shadow_report"],
+            label="shadow report",
+            finding_code="PROVENANCE_SHADOW_REPORT_INVALID",
+        )
+        assert policy is not None and report is not None
+        policy["policy_id"] = "synthetic_example_v0_mutated"
+        report["policy_id"] = policy["policy_id"]
+        _replace_provenance_artifact(
+            mutated_manifest,
+            mutated_artifacts,
+            "policy",
+            policy,
+        )
+        _replace_provenance_artifact(
+            mutated_manifest,
+            mutated_artifacts,
+            "shadow_report",
+            report,
+        )
+    elif mutation_id == "task_class_link_mismatch":
+        mutated_manifest["decision"]["task_class"] = "maintenance_mutated"
+    elif mutation_id in {"route_link_mismatch", "model_link_mismatch"}:
+        ground_truth, _ = _provenance_json_object(
+            mutated_artifacts["ground_truth"],
+            label="ground truth",
+            finding_code="PROVENANCE_GROUND_TRUTH_INVALID",
+        )
+        receipt, _ = _provenance_json_object(
+            mutated_artifacts["receipt"],
+            label="receipt",
+            finding_code="PROVENANCE_RECEIPT_INVALID",
+        )
+        assert ground_truth is not None and receipt is not None
+        if mutation_id == "route_link_mismatch":
+            ground_truth["candidate_route"] = "primary_quality"
+            receipt["candidate_route"] = "primary_quality"
+            ground_truth["attempts"][0]["route"] = "primary_quality"
+            receipt["attempts"][0]["route"] = "primary_quality"
+        else:
+            for artifact in (ground_truth, receipt):
+                artifact["attempts"][0]["requested_model"] = "integrator-b"
+                artifact["attempts"][0]["responding_model"] = "integrator-b"
+                artifact["final_model"] = "integrator-b"
+        _replace_provenance_artifact(
+            mutated_manifest,
+            mutated_artifacts,
+            "ground_truth",
+            ground_truth,
+        )
+        _replace_provenance_artifact(
+            mutated_manifest,
+            mutated_artifacts,
+            "receipt",
+            receipt,
+        )
+    elif mutation_id == "case_link_mismatch":
+        mutated_manifest["decision"]["case_id"] = "P3-M99"
+    elif mutation_id == "receipt_link_mismatch":
+        mutated_manifest["decision"]["receipt_id"] = "p3-m01-enforced-mutated"
+    elif mutation_id == "authority_overclaim":
+        receipt, _ = _provenance_json_object(
+            mutated_artifacts["receipt"],
+            label="receipt",
+            finding_code="PROVENANCE_RECEIPT_INVALID",
+        )
+        assert receipt is not None
+        receipt["actual_route"] = "fast_small"
+        _replace_provenance_artifact(
+            mutated_manifest,
+            mutated_artifacts,
+            "receipt",
+            receipt,
+        )
+    elif mutation_id == "unsafe_path":
+        mutated_manifest["artifacts"]["workload"]["path"] = "../runs.jsonl"
+    elif mutation_id == "unknown_manifest_field":
+        mutated_manifest["unknown"] = True
+    elif mutation_id == "duplicate_manifest_key":
+        duplicate_text = manifest_text.replace(
+            "{",
+            '{"schema_version":"decision_receipt_provenance_manifest_v1",',
+            1,
+        )
+        try:
+            value = json.loads(
+                duplicate_text,
+                object_pairs_hook=_reject_duplicate_keys,
+            )
+        except (ValueError, json.JSONDecodeError) as exc:
+            return [Finding("PROVENANCE_MANIFEST_JSON", str(exc))]
+        if not isinstance(value, dict):
+            return [
+                Finding(
+                    "PROVENANCE_MANIFEST_SHAPE",
+                    "provenance manifest must be a JSON object",
+                )
+            ]
+        mutated_manifest = value
+    else:
+        raise ValueError(f"unsupported provenance mutation: {mutation_id}")
+
+    _, findings = _evaluate_decision_receipt_provenance_bundle(
+        mutated_manifest,
+        mutated_artifacts,
+    )
+    return findings
+
+
+def build_decision_receipt_provenance_report(
+    manifest_path: Path,
+) -> tuple[dict[str, Any] | None, list[Finding]]:
+    manifest, findings = load_decision_receipt_provenance_manifest(manifest_path)
+    if manifest is None or findings:
+        return None, findings
+    artifacts, artifact_findings = _load_decision_receipt_provenance_artifacts(
+        manifest,
+        manifest_path,
+    )
+    if artifact_findings:
+        return None, artifact_findings
+
+    base_evaluation, base_findings = _evaluate_decision_receipt_provenance_bundle(
+        manifest,
+        artifacts,
+    )
+    if base_evaluation["non_execution"] is None:
+        return None, base_findings
+    false_rejects = int(
+        not base_evaluation["replay_passed"]
+        or not base_evaluation["chain_passed"]
+    )
+
+    detected = 0
+    false_accept_ids: list[str] = []
+    primary_miss_ids: list[str] = []
+    validator_crash_ids: list[str] = []
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    for mutation in manifest["mutations"]:
+        mutation_id = mutation["mutation_id"]
+        primary_code = mutation["primary_finding_code"]
+        try:
+            mutation_findings = _run_decision_receipt_provenance_mutation(
+                mutation_id,
+                manifest,
+                artifacts,
+                manifest_text,
+            )
+        except Exception:
+            validator_crash_ids.append(mutation_id)
+            continue
+        codes = {finding.code for finding in mutation_findings}
+        if primary_code in codes:
+            detected += 1
+        elif not mutation_findings:
+            false_accept_ids.append(mutation_id)
+        else:
+            primary_miss_ids.append(mutation_id)
+
+    selected = base_evaluation["selected_decision"]
+    selected_decision = {
+        "task_class": manifest["decision"]["task_class"],
+        "candidate_route": selected.get("candidate_route") if selected else None,
+        "candidate_model": selected.get("candidate_model") if selected else None,
+        "case_id": manifest["decision"]["case_id"],
+        "receipt_id": manifest["decision"]["receipt_id"],
+    }
+    mutation_total = len(manifest["mutations"])
+    conformant = (
+        base_evaluation["artifact_passed"]
+        == len(DECISION_RECEIPT_PROVENANCE_ARTIFACTS)
+        and base_evaluation["replay_passed"]
+        and base_evaluation["chain_passed"]
+        and false_rejects == 0
+        and detected == mutation_total
+        and not false_accept_ids
+        and not primary_miss_ids
+        and not validator_crash_ids
+    )
+    report = {
+        "schema_version": DECISION_RECEIPT_PROVENANCE_REPORT_SCHEMA_V1,
+        "manifest_version": manifest["schema_version"],
+        "manifest_id": manifest["manifest_id"],
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "artifact_integrity": {
+            "passed": base_evaluation["artifact_passed"],
+            "total": len(DECISION_RECEIPT_PROVENANCE_ARTIFACTS),
+        },
+        "shadow_report_replay": {
+            "passed": int(base_evaluation["replay_passed"]),
+            "total": 1,
+        },
+        "decision_receipt_chain": {
+            "passed": int(base_evaluation["chain_passed"]),
+            "total": 1,
+            "false_rejects": false_rejects,
+        },
+        "selected_decision": selected_decision,
+        "negative_mutations": {
+            "detected": detected,
+            "total": mutation_total,
+            "false_accepts": len(false_accept_ids),
+            "false_accept_mutation_ids": sorted(false_accept_ids),
+            "primary_misses": len(primary_miss_ids),
+            "primary_miss_mutation_ids": sorted(primary_miss_ids),
+            "validator_crashes": len(validator_crash_ids),
+            "validator_crash_mutation_ids": sorted(validator_crash_ids),
+        },
+        "non_execution": base_evaluation["non_execution"],
+        "conformant": conformant,
+    }
+    return report, []
+
+
+def render_decision_receipt_provenance_report(report: dict[str, Any]) -> str:
+    status = "PASS" if report["conformant"] else "FAIL"
+    artifacts = report["artifact_integrity"]
+    replay = report["shadow_report_replay"]
+    chain = report["decision_receipt_chain"]
+    mutations = report["negative_mutations"]
+    selected = report["selected_decision"]
+    non_execution = report["non_execution"]
+    return "\n".join(
+        [
+            (
+                f"{status} decision_receipt_provenance "
+                f"manifest={report['manifest_id']}"
+            ),
+            (
+                f"artifacts={artifacts['passed']}/{artifacts['total']} "
+                f"replay={replay['passed']}/{replay['total']} "
+                f"chain={chain['passed']}/{chain['total']} "
+                f"mutations={mutations['detected']}/{mutations['total']}"
+            ),
+            (
+                f"false_accepts={mutations['false_accepts']} "
+                f"false_rejects={chain['false_rejects']} "
+                f"primary_misses={mutations['primary_misses']} "
+                f"validator_crashes={mutations['validator_crashes']}"
+            ),
+            (
+                f"task_class={selected['task_class']} "
+                f"candidate_route={selected['candidate_route']} "
+                f"candidate_model={selected['candidate_model']} "
+                f"case={selected['case_id']} receipt={selected['receipt_id']}"
+            ),
+            (
+                "non_execution "
+                f"model_called={str(non_execution['model_called']).lower()} "
+                f"network_called={str(non_execution['network_called']).lower()} "
+                f"state_mutating={str(non_execution['state_mutating']).lower()} "
+                f"actual_route={non_execution['actual_route']} "
+                f"automatic_route_change="
+                f"{str(non_execution['automatic_route_change']).lower()} "
+                f"promotion_decision={non_execution['promotion_decision']}"
+            ),
+            f"conformant={str(report['conformant']).lower()}",
+        ]
+    )
+
+
 def _is_nonnegative_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
@@ -3057,6 +3994,26 @@ def run_self_test(root: Path) -> int:
     print(f"{'PASS' if phase2_ok else 'FAIL'} phase2_route_receipt_conformance")
     failures += not phase2_ok
 
+    phase3_manifest_path = (
+        root
+        / "examples"
+        / "phase3_decision_receipt_provenance_manifest_v1.json"
+    )
+    phase3_report, phase3_findings = build_decision_receipt_provenance_report(
+        phase3_manifest_path
+    )
+    phase3_ok = (
+        phase3_report is not None
+        and not phase3_findings
+        and phase3_report["conformant"] is True
+        and phase3_report["artifact_integrity"]["passed"] == 5
+        and phase3_report["shadow_report_replay"]["passed"] == 1
+        and phase3_report["decision_receipt_chain"]["passed"] == 1
+        and phase3_report["negative_mutations"]["detected"] == 16
+    )
+    print(f"{'PASS' if phase3_ok else 'FAIL'} phase3_decision_receipt_provenance")
+    failures += not phase3_ok
+
     if failures:
         print(f"FAIL self_test {failures} expectations failed")
         return 1
@@ -3091,6 +4048,20 @@ def main() -> int:
     )
     conformance_parser.add_argument("manifest", type=Path, help="digest-bound route-receipt case manifest")
     conformance_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    provenance_parser = subparsers.add_parser(
+        "decision-receipt-provenance",
+        help="verify one digest-bound deterministic decision-to-receipt chain",
+    )
+    provenance_parser.add_argument(
+        "manifest",
+        type=Path,
+        help="decision-receipt provenance manifest",
+    )
+    provenance_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable JSON",
+    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent
@@ -3099,7 +4070,7 @@ def main() -> int:
     if args.command is None:
         parser.error(
             "choose validate, report, shadow-route, validate-route-receipt, "
-            "route-receipt-conformance, or --self-test"
+            "route-receipt-conformance, decision-receipt-provenance, or --self-test"
         )
 
     if args.command == "validate-route-receipt":
@@ -3133,6 +4104,28 @@ def main() -> int:
         else:
             print(render_route_receipt_conformance_report(conformance_report))
         return 0 if conformance_report["conformant"] else 1
+
+    if args.command == "decision-receipt-provenance":
+        provenance_report, provenance_findings = (
+            build_decision_receipt_provenance_report(args.manifest.resolve())
+        )
+        if provenance_findings:
+            for finding in provenance_findings:
+                print(f"FAIL {finding.code} {finding.message}")
+            return 1
+        assert provenance_report is not None
+        if args.json:
+            print(
+                json.dumps(
+                    provenance_report,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+        else:
+            print(render_decision_receipt_provenance_report(provenance_report))
+        return 0 if provenance_report["conformant"] else 1
 
     records, findings = check_path(args.path.resolve())
     if findings:
