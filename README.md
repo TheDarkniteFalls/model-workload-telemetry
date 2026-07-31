@@ -5,9 +5,9 @@
 >
 > **Operation:** Read-only check; examples may use temporary files
 >
-> **A pass establishes:** Only task instances attempted by every compared model contribute to each workload report.
+> **A pass establishes:** The declared synthetic shared-task, receipt, and Phase 3 provenance checks pass.
 >
-> **It does not establish:** The report does not prove causal model superiority, cost efficiency, or statistical significance.
+> **It does not establish:** The checks do not prove live-routing safety, production reliability, causal model superiority, cost efficiency, or statistical significance.
 >
 > **First check:** `python3 -B model_workload_telemetry.py --self-test`
 <!-- toolkit-trust-card:end -->
