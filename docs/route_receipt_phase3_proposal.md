@@ -4,6 +4,11 @@
 - Implementation authority: local artifacts, validation, tests, and reporting only
 - Runtime authority: none
 
+This page explains the link from saved workload data and policy to one shadow
+decision and its receipt. “Provenance” means keeping that chain traceable to
+the exact input bytes. Start with the positive chain below, then read the
+limits before interpreting its synthetic check counts.
+
 ## Decision Summary
 
 Phase 3 adds one deterministic provenance layer between the existing shadow
