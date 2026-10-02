@@ -4,6 +4,12 @@
 - Implementation authority: completed and closed
 - Runtime authority: none
 
+This page records the design and implemented synthetic checks for version 1
+route receipts. A receipt says what happened; the separate expected-attempt
+record lets you check that account. Start with the implementation outcome
+below, then use the matrix to see which delivery and hold cases are covered.
+The proposal and authority statements remain part of the design history.
+
 ## Decision Summary
 
 Phase 2 should expand the synthetic conformance surface without changing the

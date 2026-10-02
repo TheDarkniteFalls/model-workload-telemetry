@@ -1,5 +1,63 @@
 # Model Workload Telemetry
 
+Compare model runs on tasks they both attempted, instead of comparing their
+raw token totals. This Python command-line tool reads saved run records and
+reports completion, turns, tokens, time, human scores and revision rounds for
+shared tasks in the same workload class—a group such as maintenance or research.
+
+Start with the fictional dataset below. You can inspect the comparison, try a
+policy that suggests a route, and check the records behind that suggestion.
+The tool does not call models or use the network, and it does not calculate a
+universal model winner.
+
+## Why It Exists
+
+One model may have handled many short maintenance tasks while another handled
+a few long integration tasks. Their total token use reflects those different
+assignments. Start by checking which tasks they have in common before drawing
+a comparison.
+
+A more useful comparison asks:
+
+- Did the models attempt the same task instances?
+- What kind of task was each one doing?
+- How often did each route finish?
+- Were failures caused by infrastructure, schema, source boundaries, answer
+  quality, or human revision burden?
+- How much time, context, and revision did a successful result require?
+
+## Run
+
+From this repository’s folder, use Python 3.10 or newer. Start with `validate`
+and `report` in the block below: validation checks the records, and the report
+shows results for shared tasks. The later commands explore routing proposals
+and receipt checks; `--self-test` and the unit tests check the bundled examples.
+
+```sh
+python3 -B model_workload_telemetry.py validate examples/runs.jsonl
+python3 -B model_workload_telemetry.py report examples/runs.jsonl
+python3 -B model_workload_telemetry.py report examples/runs.jsonl --json
+python3 -B model_workload_telemetry.py shadow-route examples/runs.jsonl examples/shadow_route_policy.json --json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_passive.json examples/route_receipt_attempt_ground_truth.json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_enforced.json examples/route_receipt_attempt_ground_truth.json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_d01_enforced.json examples/phase2/p2_d01_ground_truth.json
+python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_i03_enforced.json examples/phase2/p2_i03_ground_truth.json
+python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json
+python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json --json
+python3 -B model_workload_telemetry.py decision-receipt-provenance examples/phase3_decision_receipt_provenance_manifest_v1.json
+python3 -B model_workload_telemetry.py decision-receipt-provenance examples/phase3_decision_receipt_provenance_manifest_v1.json --json
+python3 -B model_workload_telemetry.py --self-test
+python3 -B -m unittest discover -s tests -v
+```
+
+The bundled dataset contains two fictional models attempting the same synthetic
+maintenance, integration, and research tasks. It is designed to show different
+workload strengths, not to imitate or rank real products. A successful check
+means these records or synthetic cases met the declared rules; it does not
+show that a live route is safe or better.
+
+<!-- toolkit-trust-card:placement -->
+
 <!-- toolkit-trust-card:start -->
 > **Public contract:** Experimental tool · about 10 min · Python 3 · no model · no network
 >
@@ -12,35 +70,9 @@
 > **First check:** `python3 -B model_workload_telemetry.py --self-test`
 <!-- toolkit-trust-card:end -->
 
-A dependency-free CLI for comparing model runs by shared task class instead of
-raw token totals.
-
-It validates synthetic JSONL run records, separates failure buckets, and
-reports completion, turns, uncached tokens, cached tokens, wall time, human
-score, and revision burden only across task IDs attempted by every compared
-model in that workload class.
-
-It deliberately does not calculate a universal model winner.
-
-## Why It Exists
-
-Raw totals are usually workload totals in disguise. One model may have handled
-many short maintenance tasks while another handled a few long integration
-tasks. Comparing their aggregate tokens says little about capability or value.
-
-A more useful comparison asks:
-
-- Did the models attempt the same task instances?
-- What kind of task was each one doing?
-- How often did each route finish?
-- Were failures caused by infrastructure, schema, source boundaries, answer
-  quality, or human revision burden?
-- How much time, context, and revision did a successful result require?
-
 ## Lessons Demonstrated
 
-This repository turns a few practical routing lessons into inspectable,
-synthetic examples:
+Use the synthetic examples to practise these checks:
 
 - Compare models only on task IDs they both attempted within the same workload
   class. Raw totals mostly measure workload mix.
@@ -62,34 +94,9 @@ These examples demonstrate reviewable evidence patterns. They do not establish
 that this harness is more reliable than a simple task-class router or that a
 route improves answer quality.
 
-## Run
-
-Requires Python 3.10 or newer.
-
-```sh
-python3 -B model_workload_telemetry.py validate examples/runs.jsonl
-python3 -B model_workload_telemetry.py report examples/runs.jsonl
-python3 -B model_workload_telemetry.py report examples/runs.jsonl --json
-python3 -B model_workload_telemetry.py shadow-route examples/runs.jsonl examples/shadow_route_policy.json --json
-python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_passive.json examples/route_receipt_attempt_ground_truth.json
-python3 -B model_workload_telemetry.py validate-route-receipt examples/route_receipt_enforced.json examples/route_receipt_attempt_ground_truth.json
-python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_d01_enforced.json examples/phase2/p2_d01_ground_truth.json
-python3 -B model_workload_telemetry.py validate-route-receipt examples/phase2/p2_i03_enforced.json examples/phase2/p2_i03_ground_truth.json
-python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json
-python3 -B model_workload_telemetry.py route-receipt-conformance examples/phase2/route_receipt_case_manifest_v1.json --json
-python3 -B model_workload_telemetry.py decision-receipt-provenance examples/phase3_decision_receipt_provenance_manifest_v1.json
-python3 -B model_workload_telemetry.py decision-receipt-provenance examples/phase3_decision_receipt_provenance_manifest_v1.json --json
-python3 -B model_workload_telemetry.py --self-test
-python3 -B -m unittest discover -s tests -v
-```
-
-The bundled dataset contains two fictional models attempting the same synthetic
-maintenance, integration, and research tasks. It is designed to show different
-workload strengths, not to imitate or rank real products.
-
 ## Record Contract
 
-Each JSONL record includes:
+JSONL is a text file with one JSON record per line. Each record includes:
 
 - unique run, task, workload-class, and model identifiers;
 - turn, input-token, output-token, cached-token, and wall-time measurements;
@@ -111,12 +118,12 @@ model's apparent result.
 
 ## Evidence-Gated Shadow Routing
 
-The `shadow-route` report turns paired workload measurements into an
-inspectable candidate route without calling a model, using the network,
-changing defaults, or executing the route.
+A shadow route is a suggestion you can inspect without running it. The
+`shadow-route` report applies a policy to paired workload measurements. It
+calls no model, uses no network, changes no defaults and executes no route.
 
 It accepts the existing JSONL run records unchanged plus a separate policy
-file that binds two model roles and declares thresholds per task class:
+file that names two model roles and sets thresholds for each task class:
 
 - `deterministic`: a declared non-model path whose synthetic fixture summary
   has enough cases and zero failures;
@@ -157,17 +164,17 @@ to change a route.
 
 This complements the [Local Model Reliability Example](https://github.com/TheDarkniteFalls/local-model-reliability-example),
 which validates one proposed model output before an application trusts it.
-Here, the unit of evidence is a set of paired run records used to assess a
-candidate workload route. The [Local Assistant Reliability Lab](https://github.com/TheDarkniteFalls/local-assistant-reliability-lab)
-remains the navigator and integrated overview; this repo supplies the focused
-measurement and shadow-decision example rather than duplicating its catalog or
-workflow.
+Use the paired records here to inspect a candidate workload route. Visit the
+[Local Assistant Reliability Lab](https://github.com/TheDarkniteFalls/local-assistant-reliability-lab)
+for an overview of the related tools and examples.
 
 ## Synthetic Route Receipts
 
-Phase 1 adds a strict, dependency-free `route_receipt_v0` validation contract.
-It reconciles a synthetic receipt against a separate attempt-ground-truth
-fixture so a receipt cannot verify itself. The formal schema is
+A route receipt records the attempts and outcome of a proposed route. Phase 1
+provides the strict, dependency-free `route_receipt_v0` format. Its validator
+compares the synthetic receipt with a separate record of expected attempts
+(the attempt-ground-truth fixture), so the receipt cannot supply its own
+expected answer. The formal schema is
 [`schemas/route_receipt_v0.schema.json`](schemas/route_receipt_v0.schema.json).
 
 The examples describe the same synthetic fallback sequence in two modes:
@@ -238,7 +245,8 @@ These exact counts describe only the declared synthetic corpus. They are not a
 reliability estimate, do not generalize statistically, and do not establish
 production readiness, better routing, or better model quality.
 
-Phase 3 adds a separate deterministic provenance layer without changing the
+Phase 3 checks provenance: which exact inputs produced a decision and how
+that decision links to its receipt. This separate check does not change the
 receipt validator. The strict
 [`decision_receipt_provenance_manifest_v1`](examples/phase3_decision_receipt_provenance_manifest_v1.json)
 binds the exact workload, policy, frozen shadow report, v1 ground truth, and v1
